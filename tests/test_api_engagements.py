@@ -1,0 +1,225 @@
+"""gate / stage / waiver / graph API のテスト
+(HANDOVER.md §5 Phase3 item11-14, Phase4 item15,17)。
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timedelta, timezone
+
+from crm_mvp.enums import GateKind, GateStrength, Stage
+from crm_mvp.models import GatePolicy, GraphNode, StageTransition, Waiver
+
+from .conftest import create_account_and_engagement
+
+
+def _seed_policy(
+    db_session, tenant_id, to_stage, strength, conditions, code=None,
+) -> GatePolicy:
+    policy = GatePolicy(
+        tenant_id=tenant_id, code=code or f"stage.{to_stage.value}", version=1,
+        industry_template="manufacturing", kind=GateKind.STAGE, strength=strength,
+        to_stage=to_stage, conditions=conditions, is_active=True,
+    )
+    db_session.add(policy)
+    db_session.flush()
+    return policy
+
+
+class TestGetGate:
+    def test_no_policy_defaults_to_advisory_allow(self, api_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        resp = api_client.get(f"/engagements/{engagement.id}/gate")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["satisfied"] is True
+        assert body["blocks_transition"] is False
+
+    def test_reports_missing_and_next_best_action(self, api_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        _seed_policy(
+            db_session, tenant_id, Stage.PROSPECT, GateStrength.WARN,
+            {"slots": [{"criterion": "identified_pain", "min_confidence": "asserted"}]},
+        )
+        db_session.commit()
+
+        resp = api_client.get(f"/engagements/{engagement.id}/gate")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["satisfied"] is False
+        assert body["blocks_transition"] is False
+        assert body["next_best_action"]["field_path"] == "criterion:identified_pain"
+
+    def test_engagement_not_found_returns_404(self, api_client, tenant_id):
+        resp = api_client.get(f"/engagements/{uuid.uuid4()}/gate")
+        assert resp.status_code == 404
+
+
+class TestTransitionStage:
+    def test_warn_gate_does_not_block_transition(self, api_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        _seed_policy(
+            db_session, tenant_id, Stage.PROSPECT, GateStrength.WARN,
+            {"slots": [{"criterion": "identified_pain", "min_confidence": "asserted"}]},
+        )
+        db_session.commit()
+
+        resp = api_client.post(
+            f"/engagements/{engagement.id}/stage",
+            json={"to_stage": "prospect", "actor_id": str(uuid.uuid4())},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["allowed"] is True
+        assert body["stage"] == "prospect"
+        assert body["gate"]["satisfied"] is False
+
+        transition = db_session.query(StageTransition).filter_by(
+            tenant_id=tenant_id, engagement_id=engagement.id,
+        ).one()
+        assert transition.to_stage == "prospect"
+        assert transition.gate_snapshot["satisfied"] is False
+
+    def test_require_approval_blocks_without_waiver(
+        self, api_client, db_session, tenant_id,
+    ):
+        _, engagement = create_account_and_engagement(db_session, tenant_id, Stage.PROSPECT)
+        _seed_policy(
+            db_session, tenant_id, Stage.QUALIFIED, GateStrength.REQUIRE_APPROVAL,
+            {"slots": [{"criterion": "budget", "min_confidence": "verified"}]},
+        )
+        db_session.commit()
+
+        resp = api_client.post(
+            f"/engagements/{engagement.id}/stage",
+            json={"to_stage": "qualified", "actor_id": str(uuid.uuid4())},
+        )
+        assert resp.status_code == 409
+        assert db_session.query(StageTransition).count() == 0
+
+    def test_valid_waiver_allows_blocked_transition(
+        self, api_client, db_session, tenant_id,
+    ):
+        _, engagement = create_account_and_engagement(db_session, tenant_id, Stage.PROSPECT)
+        policy = _seed_policy(
+            db_session, tenant_id, Stage.QUALIFIED, GateStrength.REQUIRE_APPROVAL,
+            {"slots": [{"criterion": "budget", "min_confidence": "verified"}]},
+        )
+        approver = uuid.uuid4()
+        waiver = Waiver(
+            tenant_id=tenant_id, engagement_id=engagement.id, policy_id=policy.id,
+            approved_by=approver, reason="経営判断により先行",
+            approved_at=datetime.now(timezone.utc),
+        )
+        db_session.add(waiver)
+        db_session.flush()
+        db_session.commit()
+
+        resp = api_client.post(
+            f"/engagements/{engagement.id}/stage",
+            json={
+                "to_stage": "qualified", "actor_id": str(uuid.uuid4()),
+                "waiver_id": str(waiver.id),
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["allowed"] is True
+
+        transition = db_session.query(StageTransition).filter_by(
+            tenant_id=tenant_id, engagement_id=engagement.id,
+        ).one()
+        assert transition.waiver_id == waiver.id
+
+    def test_mismatched_waiver_is_rejected(self, api_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id, Stage.PROSPECT)
+        _seed_policy(
+            db_session, tenant_id, Stage.QUALIFIED, GateStrength.REQUIRE_APPROVAL,
+            {"slots": [{"criterion": "budget", "min_confidence": "verified"}]},
+        )
+        db_session.commit()
+
+        resp = api_client.post(
+            f"/engagements/{engagement.id}/stage",
+            json={
+                "to_stage": "qualified", "actor_id": str(uuid.uuid4()),
+                "waiver_id": str(uuid.uuid4()),
+            },
+        )
+        assert resp.status_code == 422
+
+    def test_expired_waiver_is_rejected(self, api_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id, Stage.PROSPECT)
+        policy = _seed_policy(
+            db_session, tenant_id, Stage.QUALIFIED, GateStrength.REQUIRE_APPROVAL,
+            {"slots": [{"criterion": "budget", "min_confidence": "verified"}]},
+        )
+        waiver = Waiver(
+            tenant_id=tenant_id, engagement_id=engagement.id, policy_id=policy.id,
+            approved_by=uuid.uuid4(), reason="期限切れテスト",
+            approved_at=datetime.now(timezone.utc) - timedelta(days=10),
+            valid_until=datetime.now(timezone.utc) - timedelta(days=1),
+        )
+        db_session.add(waiver)
+        db_session.flush()
+        db_session.commit()
+
+        resp = api_client.post(
+            f"/engagements/{engagement.id}/stage",
+            json={
+                "to_stage": "qualified", "actor_id": str(uuid.uuid4()),
+                "waiver_id": str(waiver.id),
+            },
+        )
+        assert resp.status_code == 422
+
+
+class TestCreateWaiver:
+    def test_creates_waiver(self, api_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        policy = _seed_policy(
+            db_session, tenant_id, Stage.QUALIFIED, GateStrength.REQUIRE_APPROVAL, {},
+        )
+        db_session.commit()
+
+        resp = api_client.post(
+            f"/engagements/{engagement.id}/waivers",
+            json={
+                "policy_id": str(policy.id), "approved_by": str(uuid.uuid4()),
+                "reason": "経営判断",
+            },
+        )
+        assert resp.status_code == 201
+        assert resp.json()["engagement_id"] == str(engagement.id)
+
+
+class TestGraph:
+    def test_graph_json_reflects_nodes(self, api_client, db_session, tenant_id):
+        account, engagement = create_account_and_engagement(db_session, tenant_id)
+        node = GraphNode(
+            tenant_id=tenant_id, account_id=account.id,
+            placeholder_label="決裁者(氏名未確認)", seniority_layer=3,
+        )
+        db_session.add(node)
+        db_session.flush()
+        db_session.commit()
+
+        resp = api_client.get(f"/engagements/{engagement.id}/graph")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body["nodes"]) == 1
+        assert body["nodes"][0]["label"] == "決裁者(氏名未確認)"
+        assert body["nodes"][0]["is_placeholder"] is True
+
+    def test_graph_svg_renders(self, api_client, db_session, tenant_id):
+        account, engagement = create_account_and_engagement(db_session, tenant_id)
+        db_session.add(GraphNode(
+            tenant_id=tenant_id, account_id=account.id, placeholder_label="A",
+        ))
+        db_session.commit()
+
+        resp = api_client.get(f"/engagements/{engagement.id}/graph.svg")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("image/svg+xml")
+        assert b"<svg" in resp.content
