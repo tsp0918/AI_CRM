@@ -8,6 +8,7 @@ Account/Contact/Engagementへ引き継がれる。
 from __future__ import annotations
 
 import uuid
+from collections import Counter
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -25,7 +26,7 @@ from ...services.lead_lifecycle import (
     convert_lead, disqualify_lead, list_touches, maybe_promote_to_mql,
     promote_lead, record_touch,
 )
-from ...services.lead_scoring import compute_lead_score
+from ...services.lead_scoring import compute_lead_score, list_lead_scores
 from ...services.sequences import dismiss_draft, enroll_lead, mark_draft_reviewed, opt_out_enrollment
 from .common import base_context, redirect_with_flash
 from .session import UiSession, get_ui_db_session, require_ui_session
@@ -37,6 +38,9 @@ LEAD_STATUS_LABELS = {
     "new": "新規", "working": "接触中", "mql": "MQL", "sql": "SQL",
     "converted": "案件化済み", "disqualified": "対象外",
 }
+LEAD_STATUS_ORDER = ["new", "working", "mql", "sql", "converted", "disqualified"]
+QUADRANT_LABELS = {"hot": "Hot", "watch": "Watch", "nurture": "Nurture", "low": "Low"}
+QUADRANT_ORDER = ["hot", "watch", "nurture", "low"]
 SOURCE_CHANNEL_LABELS = {
     "inbound": "インバウンド", "outbound": "アウトバウンド", "event": "イベント",
     "referral": "紹介", "content": "コンテンツ", "partner": "パートナー",
@@ -103,20 +107,35 @@ def _score_and_context(session: Session, tenant_id: uuid.UUID, lead: Lead) -> di
 @router.get("/ui/leads", response_class=HTMLResponse)
 def leads_list(
     request: Request,
+    facet: str = "status",
+    status: str = "",
+    quadrant: str = "",
     flash: str | None = None,
     flash_type: str = "info",
     ui_session: UiSession = Depends(require_ui_session),
     session: Session = Depends(get_ui_db_session),
 ) -> HTMLResponse:
-    leads = session.execute(
-        select(Lead).where(Lead.tenant_id == ui_session.tenant_id)
-        .order_by(Lead.updated_at.desc())
-    ).scalars().all()
+    facet = facet if facet in ("status", "quadrant") else "status"
+    all_rows = list_lead_scores(session, ui_session.tenant_id)
 
-    rows = []
-    for lead in leads:
-        ctx = _score_and_context(session, ui_session.tenant_id, lead)
-        rows.append({"lead": lead, "score": ctx["score"]})
+    if facet == "status":
+        facet_counts = Counter(row["lead"].status for row in all_rows)
+        rows = [r for r in all_rows if not status or r["lead"].status == status] \
+            if status else all_rows
+        facet_choices = [
+            (s, LEAD_STATUS_LABELS.get(s, s), facet_counts.get(s, 0))
+            for s in LEAD_STATUS_ORDER
+        ]
+        selected_facet_value = status
+    else:
+        facet_counts = Counter(row["score"].quadrant for row in all_rows)
+        rows = [r for r in all_rows if r["score"].quadrant == quadrant] \
+            if quadrant else all_rows
+        facet_choices = [
+            (q, QUADRANT_LABELS.get(q, q), facet_counts.get(q, 0))
+            for q in QUADRANT_ORDER
+        ]
+        selected_facet_value = quadrant
 
     available_sequences = session.execute(
         select(Sequence).where(
@@ -128,8 +147,10 @@ def leads_list(
         session, ui_session, active_nav="leads", flash=flash, flash_type=flash_type,
     )
     context.update({
-        "rows": rows, "lead_status_labels": LEAD_STATUS_LABELS,
+        "rows": rows, "total_count": len(all_rows), "lead_status_labels": LEAD_STATUS_LABELS,
         "available_sequences": available_sequences,
+        "facet": facet, "facet_choices": facet_choices,
+        "selected_facet_value": selected_facet_value,
     })
     return templates.TemplateResponse(request, "leads.html", context)
 

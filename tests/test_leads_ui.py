@@ -27,6 +27,44 @@ class TestLeadsList:
         assert resp.status_code == 200
         assert "山田電子工業株式会社" in resp.text
 
+    def test_status_facet_filters_and_shows_counts(self, ui_client, db_session, tenant_id):
+        make_lead(db_session, tenant_id, company_name="新規社", status=LeadStatus.NEW)
+        make_lead(db_session, tenant_id, company_name="接触中社", status=LeadStatus.WORKING)
+        db_session.commit()
+
+        resp = ui_client.get("/ui/leads?facet=status")
+        assert resp.status_code == 200
+        assert "新規社" in resp.text
+        assert "接触中社" in resp.text
+
+        resp_new = ui_client.get("/ui/leads?facet=status&status=new")
+        assert resp_new.status_code == 200
+        assert "新規社" in resp_new.text
+        assert "接触中社" not in resp_new.text
+
+    def test_quadrant_facet_filters(self, ui_client, db_session, tenant_id):
+        # 接点も紐付くAccountも無い新規Leadはcompany_score=0,person_score=0 -> quadrant "low"
+        make_lead(db_session, tenant_id, company_name="Low象限社")
+        db_session.commit()
+
+        resp = ui_client.get("/ui/leads?facet=quadrant&quadrant=low")
+        assert resp.status_code == 200
+        assert "Low象限社" in resp.text
+
+        resp_hot = ui_client.get("/ui/leads?facet=quadrant&quadrant=hot")
+        assert resp_hot.status_code == 200
+        assert "Low象限社" not in resp_hot.text
+
+    def test_facet_tabs_and_total_count_render(self, ui_client, db_session, tenant_id):
+        make_lead(db_session, tenant_id)
+        db_session.commit()
+
+        resp = ui_client.get("/ui/leads")
+        assert resp.status_code == 200
+        assert "ステータスで見る" in resp.text
+        assert "優先度で見る" in resp.text
+        assert "全体" in resp.text
+
 
 class TestLeadCreation:
     def test_creates_lead_and_redirects_to_detail(self, ui_client, db_session, tenant_id):

@@ -5,61 +5,85 @@
 {% block content %}
 <h1>リード</h1>
 <p class="subtitle">
-  {{ rows | length }} 件。Marketing/Inside Sales の見込み客(案件化前)。
+  {{ total_count }} 件。Marketing/Inside Sales の見込み客(案件化前)。
   「案件」(ダッシュボードの商談一覧)とは別の、案件化する前の段階を管理するオブジェクトです。
 </p>
 <p style="margin-bottom:16px;"><a href="/ui/leads/new" class="btn btn-sm">+ リードを登録</a></p>
 
-{% if rows %}
-<form method="post" action="/ui/leads/bulk-enroll" id="bulk-enroll-form">
-<div class="card" style="padding:0;">
-  <table>
-    <thead>
-      <tr>
-        <th style="width:24px;"></th>
-        <th>氏名</th><th>会社</th><th>ステータス</th><th>象限</th>
-        <th>Company</th><th>Person</th><th></th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for row in rows %}
-      <tr>
-        <td><input type="checkbox" name="lead_ids" value="{{ row.lead.id }}"></td>
-        <td><a href="/ui/leads/{{ row.lead.id }}">{{ row.lead.full_name }}</a></td>
-        <td>{{ row.lead.company_name }}</td>
-        <td>{{ lead_status_labels.get(row.lead.status, row.lead.status) }}</td>
-        <td><span class="quadrant-badge quadrant-{{ row.score.quadrant }}">{{ row.score.quadrant }}</span></td>
-        <td class="mono">{{ row.score.company_score }}</td>
-        <td class="mono">{{ row.score.person_score }}</td>
-        <td><a href="/ui/leads/{{ row.lead.id }}">詳細 &rarr;</a></td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
-
-{% if available_sequences %}
-<div class="card">
-  <p class="subtitle" style="margin-bottom:10px;">選択したLeadを一括でシーケンスに登録する</p>
-  <div class="field-row" style="align-items:end; max-width:480px;">
-    <div>
-      <label for="sequence_id">シーケンス</label>
-      <select id="sequence_id" name="sequence_id" style="margin-bottom:14px;">
-        {% for s in available_sequences %}
-        <option value="{{ s.id }}">{{ s.name }}</option>
-        {% endfor %}
-      </select>
+<div class="facet-layout">
+  <aside class="facet-rail">
+    <div class="facet-tabs">
+      <a href="/ui/leads?facet=status" class="{% if facet == 'status' %}active{% endif %}">ステータスで見る</a>
+      <a href="/ui/leads?facet=quadrant" class="{% if facet == 'quadrant' %}active{% endif %}">優先度で見る</a>
     </div>
-    <button type="submit" class="btn btn-sm" style="margin-bottom:14px;">選択したLeadを登録</button>
+    <a href="/ui/leads?facet={{ facet }}" class="facet-link {% if not selected_facet_value %}active{% endif %}">
+      全体 <span class="facet-count">{{ total_count }}</span>
+    </a>
+    {% for value, label, count in facet_choices %}
+    <a href="/ui/leads?facet={{ facet }}&{{ 'status' if facet == 'status' else 'quadrant' }}={{ value }}"
+       class="facet-link {% if selected_facet_value == value %}active{% endif %}">
+      {{ label }} <span class="facet-count">{{ count }}</span>
+    </a>
+    {% endfor %}
+  </aside>
+
+  <div class="facet-main">
+    {% if rows %}
+    <form method="post" action="/ui/leads/bulk-enroll" id="bulk-enroll-form">
+    <div class="card" style="padding:0;">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:24px;"></th>
+            <th>氏名</th><th>会社</th><th>ステータス</th><th>象限</th>
+            <th>Company</th><th>Person</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td><input type="checkbox" name="lead_ids" value="{{ row.lead.id }}"></td>
+            <td><a href="/ui/leads/{{ row.lead.id }}">{{ row.lead.full_name }}</a></td>
+            <td>{{ row.lead.company_name }}</td>
+            <td>{{ lead_status_labels.get(row.lead.status, row.lead.status) }}</td>
+            <td><span class="quadrant-badge quadrant-{{ row.score.quadrant }}">{{ row.score.quadrant }}</span></td>
+            <td class="mono">{{ row.score.company_score }}</td>
+            <td class="mono">{{ row.score.person_score }}</td>
+            <td><a href="/ui/leads/{{ row.lead.id }}">詳細 &rarr;</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if available_sequences %}
+    <div class="card">
+      <p class="subtitle" style="margin-bottom:10px;">選択したLeadを一括でシーケンスに登録する</p>
+      <div class="field-row" style="align-items:end; max-width:480px;">
+        <div>
+          <label for="sequence_id">シーケンス</label>
+          <select id="sequence_id" name="sequence_id" style="margin-bottom:14px;">
+            {% for s in available_sequences %}
+            <option value="{{ s.id }}">{{ s.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <button type="submit" class="btn btn-sm" style="margin-bottom:14px;">選択したLeadを登録</button>
+      </div>
+    </div>
+    {% endif %}
+    </form>
+    {% else %}
+    <div class="card">
+      <div class="empty-state">
+        {% if total_count == 0 %}
+        まだLeadがありません。<a href="/ui/leads/new">+ Leadを登録</a> から作成してください。
+        {% else %}
+        この絞り込みに該当するLeadはありません。
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
   </div>
 </div>
-{% endif %}
-</form>
-{% else %}
-<div class="card">
-  <div class="empty-state">
-    まだLeadがありません。<a href="/ui/leads/new">+ Leadを登録</a> から作成してください。
-  </div>
-</div>
-{% endif %}
 {% endblock %}

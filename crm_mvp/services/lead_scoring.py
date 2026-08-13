@@ -14,8 +14,12 @@ firmographicデータは未接続のため、将来の拡張点として残す�
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from ..enums import TouchChannel
 from ..models import Account, Lead, Touch
@@ -119,3 +123,41 @@ def compute_lead_score(
         company_score=company_score, person_score=person_score,
         company_reasons=company_reasons, person_reasons=person_reasons,
     )
+
+
+def list_lead_scores(session: Session, tenant_id: uuid.UUID) -> list[dict]:
+    """一覧画面(Lead一覧のパイプライン/象限ビュー)向けに、テナント内の
+    全Leadのスコアを一括計算する。Lead単位で list_touches を都度呼ぶと
+    N+1になるため、Account/Touchをそれぞれ1クエリで先に読み込んでおく。"""
+    leads = session.execute(
+        select(Lead).where(Lead.tenant_id == tenant_id).order_by(Lead.updated_at.desc())
+    ).scalars().all()
+    if not leads:
+        return []
+
+    account_ids = {lead.matched_account_id for lead in leads if lead.matched_account_id}
+    accounts = {
+        a.id: a for a in session.execute(
+            select(Account).where(Account.id.in_(account_ids))
+        ).scalars()
+    } if account_ids else {}
+
+    touches_by_lead: dict[uuid.UUID, list[Touch]] = {}
+    for touch in session.execute(
+        select(Touch).where(
+            Touch.tenant_id == tenant_id,
+            Touch.lead_id.in_([lead.id for lead in leads]),
+        )
+    ).scalars():
+        touches_by_lead.setdefault(touch.lead_id, []).append(touch)
+
+    now = datetime.now(timezone.utc)
+    return [
+        {
+            "lead": lead,
+            "score": compute_lead_score(
+                lead, accounts.get(lead.matched_account_id), touches_by_lead.get(lead.id, []), now,
+            ),
+        }
+        for lead in leads
+    ]

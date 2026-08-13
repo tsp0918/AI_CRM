@@ -233,6 +233,32 @@
     .quadrant-nurture { background: #dbeafe; color: #1e40af; }
     .quadrant-low { background: #f3f4f6; color: #6b7280; }
 
+    /* Facet Rail: Lead一覧・見積契約一覧・契約更新一覧で共通の
+       「左に絞り込み、右に結果」レイアウト(2026-08-14)。 */
+    .facet-layout { display: flex; gap: 20px; align-items: flex-start; }
+    .facet-rail { width: 200px; flex-shrink: 0; }
+    .facet-tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+    .facet-tabs a { flex: 1; text-align: center; font-size: 12px; padding: 6px 4px; border-radius: 6px; background: #eef0f3; color: #4b5563; }
+    .facet-tabs a:hover { text-decoration: none; background: #e5e7eb; }
+    .facet-tabs a.active { background: #2563eb; color: white; }
+    .facet-link {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 6px 10px; border-radius: 6px; font-size: 13px; color: #374151;
+    }
+    .facet-link:hover { background: #f3f4f6; text-decoration: none; }
+    .facet-link.active { background: #eff6ff; color: #1d4ed8; font-weight: 600; }
+    .facet-count { font-size: 11px; color: #9ca3af; font-family: ui-monospace, monospace; }
+    .facet-link.active .facet-count { color: #2563eb; }
+    .facet-tree summary.facet-link { cursor: pointer; }
+    .facet-tree details a.facet-link { padding-left: 22px; }
+    .facet-main { flex: 1; min-width: 0; }
+    .status-section { margin-top: 18px; }
+    .status-section:first-child { margin-top: 0; }
+    .status-section-label {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+      color: #6b7280; font-weight: 600; margin-bottom: 6px;
+    }
+
     /* シーケンスのパイプライン進捗ステッパー */
     .pipeline { display: flex; align-items: flex-start; gap: 0; margin: 10px 0 6px; overflow-x: auto; padding-bottom: 4px; }
     .pipeline-step { display: flex; flex-direction: column; align-items: center; min-width: 108px; position: relative; }
@@ -269,6 +295,8 @@
       table { display: block; overflow-x: auto; white-space: nowrap; }
       .btn { padding: 10px 16px; font-size: 14px; }
       input[type=text], input[type=url], textarea, select { font-size: 16px; }
+      .facet-layout { flex-direction: column; }
+      .facet-rail { width: 100%; }
     }
   </style>
   {% block extra_head %}{% endblock %}

@@ -109,3 +109,32 @@ class TestQuadrant:
         assert score.company_score < 50
         assert score.person_score >= 50
         assert score.quadrant == "nurture"
+
+
+class TestListLeadScores:
+    def test_batch_computes_scores_for_all_tenant_leads(self, db_session, tenant_id):
+        from crm_mvp.services.lead_scoring import list_lead_scores
+
+        lead_a = Lead(
+            tenant_id=tenant_id, company_name="A社", full_name="担当A", written_by="human:sdr-1",
+        )
+        lead_b = Lead(
+            tenant_id=tenant_id, company_name="B社", full_name="担当B", written_by="human:sdr-1",
+        )
+        db_session.add_all([lead_a, lead_b])
+        db_session.flush()
+        db_session.add(Touch(
+            tenant_id=tenant_id, lead_id=lead_a.id, channel=TouchChannel.CONTENT_DOWNLOAD,
+            occurred_at=datetime.now(timezone.utc), source_system="test",
+        ))
+        db_session.commit()
+
+        results = list_lead_scores(db_session, tenant_id)
+        assert len(results) == 2
+        by_id = {r["lead"].id: r["score"] for r in results}
+        assert by_id[lead_a.id].person_score > 0
+        assert by_id[lead_b.id].person_score == 0
+
+    def test_empty_tenant_returns_empty_list(self, db_session, tenant_id):
+        from crm_mvp.services.lead_scoring import list_lead_scores
+        assert list_lead_scores(db_session, tenant_id) == []
