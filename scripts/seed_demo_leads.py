@@ -1,0 +1,208 @@
+"""デモ用Lead/シーケンスデータの投入コマンド。
+
+  python scripts/seed_demo_leads.py --tenant-id <uuid>
+
+指定テナントのLead関連データ(sequence_draft/sequence_enrollment/
+sequence_step/sequence/touch/lead)を全削除したうえで、4象限(hot/watch/
+nurture/low)にまたがるダミーLeadと、1件のデモシーケンスを実際の
+サービス層(record_touch / enroll_lead / generate_due_drafts)を通して
+作り直す。scripts/seed_demo_pipeline.py が Engagement 側のデモデータを
+作るのと対になる、Lead側のデモデータ投入スクリプト。
+
+§7.4: crm_app ロール(非 superuser)で接続し、RLS のテナント文脈を
+自分で SET してから実行する。
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import uuid
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session
+
+from crm_mvp.enums import (
+    LeadSourceChannel, LeadStatus, SequenceStepChannel, TouchChannel,
+)
+from crm_mvp.models import Lead
+from crm_mvp.services.lead_lifecycle import record_touch
+from crm_mvp.services.sequences import (
+    create_sequence, enroll_lead, generate_due_drafts, mark_draft_reviewed,
+)
+
+DEFAULT_DATABASE_URL = "postgresql+psycopg://crm_app@localhost:5432/crm_mvp"
+DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-0000000000aa")
+
+TENANT_ID = DEFAULT_TENANT_ID
+ACTOR_ID = uuid.uuid4()
+NOW = datetime.now(timezone.utc)
+
+LEAD_TABLES = [
+    "sequence_draft", "sequence_enrollment", "sequence_step", "sequence",
+    "touch", "lead",
+]
+
+
+def days_ago(n: float) -> datetime:
+    return NOW - timedelta(days=n)
+
+
+def wipe_lead_data(session: Session) -> None:
+    for table in LEAD_TABLES:
+        session.execute(
+            text(f"DELETE FROM {table} WHERE tenant_id = :tid"), {"tid": str(TENANT_ID)}
+        )
+
+
+def build_demo_sequence(session: Session):
+    return create_sequence(
+        session, TENANT_ID, name="製造業 新規開拓 3ステップ",
+        description="資料DL・問い合わせ後のフォローアップ想定",
+        steps=[
+            {
+                "channel": SequenceStepChannel.EMAIL, "delay_days": 0,
+                "subject_template": "{{company_name}}様へのご案内",
+                "body_template": (
+                    "{{full_name}}様\n\nお世話になっております。{{recent_signal}}を"
+                    "拝見し、ご連絡いたしました。導入事例など詳しい資料をお送り"
+                    "できますが、一度お話しする機会をいただけますでしょうか。"
+                ),
+            },
+            {
+                "channel": SequenceStepChannel.CALL_TASK, "delay_days": 3,
+                "body_template": (
+                    "{{full_name}}様({{title}})へお電話し、検討状況とお困りごとを伺う。"
+                ),
+            },
+            {
+                "channel": SequenceStepChannel.EMAIL, "delay_days": 4,
+                "subject_template": "その後の状況はいかがでしょうか",
+                "body_template": (
+                    "{{full_name}}様\n\n先日はご検討のお時間をいただきありがとう"
+                    "ございました。ご不明点があればいつでもご連絡ください。"
+                ),
+            },
+        ],
+        actor=f"human:{ACTOR_ID}",
+    )
+
+
+def build_lead_hot(session: Session, sequence) -> Lead:
+    """Hot: 高関心度の接点2件 + 役職マッチ。シーケンスを2ステップ分進める
+    (1件目レビュー済み、2件目は未対応のドラフトのまま)。"""
+    lead = Lead(
+        tenant_id=TENANT_ID, company_name="関東鋳造株式会社", full_name="小林 直樹",
+        title="生産技術部長", email="kobayashi@example.com",
+        source_channel=LeadSourceChannel.CONTENT, status=LeadStatus.WORKING,
+        owner="IS 田中", written_by=f"human:{ACTOR_ID}", created_at=days_ago(6),
+    )
+    session.add(lead)
+    session.flush()
+
+    record_touch(
+        session, TENANT_ID, lead, channel=TouchChannel.CONTENT_DOWNLOAD,
+        occurred_at=days_ago(6), source_system="manual", actor="system",
+        raw_payload={"note": "導入事例資料をダウンロード"},
+    )
+    record_touch(
+        session, TENANT_ID, lead, channel=TouchChannel.FORM_SUBMIT,
+        occurred_at=days_ago(5), source_system="manual", actor="system",
+    )
+
+    enroll_lead(session, TENANT_ID, lead, sequence, actor=f"human:{ACTOR_ID}", now=days_ago(5))
+    first_drafts = generate_due_drafts(session, TENANT_ID, now=days_ago(5))
+    mark_draft_reviewed(first_drafts[0], reviewed_by=f"human:{ACTOR_ID}", now=days_ago(4))
+    generate_due_drafts(session, TENANT_ID, now=days_ago(1))
+    return lead
+
+
+def build_lead_watch(session: Session, sequence) -> Lead:
+    """Watch: 高関心度の接点はあるが1件のみ、役職不明。会社としては
+    反応があるが人物の反応度はまだ低い。"""
+    lead = Lead(
+        tenant_id=TENANT_ID, company_name="三河バルブ工業株式会社", full_name="佐藤 健一",
+        source_channel=LeadSourceChannel.OUTBOUND, status=LeadStatus.WORKING,
+        owner="IS 田中", written_by=f"human:{ACTOR_ID}", created_at=days_ago(3),
+    )
+    session.add(lead)
+    session.flush()
+
+    record_touch(
+        session, TENANT_ID, lead, channel=TouchChannel.FORM_SUBMIT,
+        occurred_at=days_ago(3), source_system="manual", actor="system",
+    )
+
+    enroll_lead(session, TENANT_ID, lead, sequence, actor=f"human:{ACTOR_ID}", now=days_ago(2))
+    generate_due_drafts(session, TENANT_ID, now=days_ago(2))
+    return lead
+
+
+def build_lead_nurture(session: Session) -> Lead:
+    """Nurture: 役職は決裁層に近いが、反応は低関心度チャネル(メール開封)
+    のみ。まだシーケンスには登録しない(様子見の状態を再現)。"""
+    lead = Lead(
+        tenant_id=TENANT_ID, company_name="相模鉄工株式会社", full_name="田村 誠",
+        title="工場長", source_channel=LeadSourceChannel.EVENT, status=LeadStatus.WORKING,
+        owner="IS 鈴木", written_by=f"human:{ACTOR_ID}", created_at=days_ago(10),
+    )
+    session.add(lead)
+    session.flush()
+
+    for d in (9, 6, 3):
+        record_touch(
+            session, TENANT_ID, lead, channel=TouchChannel.EMAIL_OPEN,
+            occurred_at=days_ago(d), source_system="manual", actor="system",
+        )
+    return lead
+
+
+def build_lead_low(session: Session) -> Lead:
+    """Low: 登録されたばかりで接点も役職情報もない、素の初期状態。"""
+    lead = Lead(
+        tenant_id=TENANT_ID, company_name="北信精機株式会社", full_name="木村 さゆり",
+        title="総務", source_channel=LeadSourceChannel.INBOUND, status=LeadStatus.NEW,
+        owner="IS 鈴木", written_by=f"human:{ACTOR_ID}", created_at=days_ago(1),
+    )
+    session.add(lead)
+    session.flush()
+    return lead
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--tenant-id", type=uuid.UUID, default=DEFAULT_TENANT_ID,
+        help="投入先テナントID(既存のLead関連データはこのテナント分のみ全削除される)",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    global TENANT_ID
+    args = parse_args()
+    TENANT_ID = args.tenant_id
+
+    database_url = os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL)
+    engine = create_engine(database_url)
+    with Session(engine) as session:
+        session.execute(
+            text("SELECT set_config('app.current_tenant_id', :tid, false)"),
+            {"tid": str(TENANT_ID)},
+        )
+        wipe_lead_data(session)
+        session.commit()
+
+        sequence = build_demo_sequence(session)
+        build_lead_hot(session, sequence)
+        build_lead_watch(session, sequence)
+        build_lead_nurture(session)
+        build_lead_low(session)
+        session.commit()
+
+    print(f"Rebuilt demo lead/sequence data for tenant {TENANT_ID}.")
+
+
+if __name__ == "__main__":
+    main()

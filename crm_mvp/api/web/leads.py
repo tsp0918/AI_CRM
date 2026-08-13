@@ -14,13 +14,16 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ...enums import LeadSourceChannel, LeadStatus, TouchChannel
-from ...models import Account, Lead
+from ...enums import (
+    LeadSourceChannel, LeadStatus, SequenceEnrollmentStatus, TouchChannel,
+)
+from ...models import Account, Lead, Sequence, SequenceDraft, SequenceEnrollment
 from ...services.lead_lifecycle import (
     convert_lead, disqualify_lead, list_touches, maybe_promote_to_mql,
     promote_lead, record_touch,
 )
 from ...services.lead_scoring import compute_lead_score
+from ...services.sequences import dismiss_draft, enroll_lead, mark_draft_reviewed, opt_out_enrollment
 from .common import base_context, redirect_with_flash
 from .session import UiSession, get_ui_db_session, require_ui_session
 from .templates import templates
@@ -34,6 +37,9 @@ LEAD_STATUS_LABELS = {
 SOURCE_CHANNEL_LABELS = {
     "inbound": "インバウンド", "outbound": "アウトバウンド", "event": "イベント",
     "referral": "紹介", "content": "コンテンツ", "partner": "パートナー",
+}
+STEP_CHANNEL_LABELS = {
+    "email": "メール", "call_task": "架電タスク", "linkedin": "LinkedIn",
 }
 TOUCH_CHANNEL_LABELS = {
     "form_submit": "フォーム送信", "content_download": "資料DL",
@@ -146,6 +152,33 @@ def lead_detail(
     ctx = _score_and_context(session, ui_session.tenant_id, lead)
     next_status = NEXT_STATUS.get(lead.status)
 
+    available_sequences = session.execute(
+        select(Sequence).where(
+            Sequence.tenant_id == ui_session.tenant_id, Sequence.is_active.is_(True),
+        ).order_by(Sequence.name)
+    ).scalars().all()
+
+    enrollments = session.execute(
+        select(SequenceEnrollment).where(
+            SequenceEnrollment.tenant_id == ui_session.tenant_id,
+            SequenceEnrollment.lead_id == lead.id,
+        ).order_by(SequenceEnrollment.created_at.desc())
+    ).scalars().all()
+    sequence_names = {
+        s.id: s.name for s in session.execute(
+            select(Sequence).where(Sequence.tenant_id == ui_session.tenant_id)
+        ).scalars()
+    }
+    enrollment_ids = [e.id for e in enrollments]
+    drafts = []
+    if enrollment_ids:
+        drafts = session.execute(
+            select(SequenceDraft).where(
+                SequenceDraft.tenant_id == ui_session.tenant_id,
+                SequenceDraft.enrollment_id.in_(enrollment_ids),
+            ).order_by(SequenceDraft.generated_at.desc())
+        ).scalars().all()
+
     context = base_context(
         session, ui_session, active_nav="leads", flash=flash, flash_type=flash_type,
     )
@@ -156,6 +189,10 @@ def lead_detail(
         "source_channel_labels": SOURCE_CHANNEL_LABELS,
         "touch_channel_labels": TOUCH_CHANNEL_LABELS,
         "touch_channels": list(TouchChannel),
+        "available_sequences": available_sequences,
+        "enrollments": enrollments, "sequence_names": sequence_names,
+        "drafts": drafts, "step_channel_labels": STEP_CHANNEL_LABELS,
+        "active_enrollment_status": SequenceEnrollmentStatus.ACTIVE,
     })
     return templates.TemplateResponse(request, "lead_detail.html", context)
 
@@ -232,3 +269,98 @@ def disqualify_lead_ui(
     disqualify_lead(session, lead, reason=reason.strip())
     session.commit()
     return redirect_with_flash(f"/ui/leads/{lead_id}", "対象外にしました")
+
+
+# --- アウトバウンド・シーケンス(下書き止まり) ---------------------------------
+
+@router.post("/ui/leads/{lead_id}/sequences")
+def enroll_sequence_ui(
+    lead_id: uuid.UUID,
+    sequence_id: uuid.UUID = Form(...),
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> RedirectResponse:
+    lead = _get_lead_or_404(session, ui_session, lead_id)
+    sequence = session.get(Sequence, sequence_id)
+    if sequence is None or sequence.tenant_id != ui_session.tenant_id:
+        raise HTTPException(status_code=404, detail="sequence not found")
+
+    try:
+        enroll_lead(
+            session, ui_session.tenant_id, lead, sequence,
+            actor=f"human:{ui_session.actor_id}",
+        )
+    except ValueError as exc:
+        session.rollback()
+        return redirect_with_flash(f"/ui/leads/{lead_id}", str(exc), "error")
+    session.commit()
+    return redirect_with_flash(f"/ui/leads/{lead_id}", f"「{sequence.name}」に登録しました")
+
+
+def _get_enrollment_or_404(
+    session: Session, ui_session: UiSession, lead_id: uuid.UUID, enrollment_id: uuid.UUID,
+) -> SequenceEnrollment:
+    enrollment = session.execute(
+        select(SequenceEnrollment).where(
+            SequenceEnrollment.tenant_id == ui_session.tenant_id,
+            SequenceEnrollment.id == enrollment_id, SequenceEnrollment.lead_id == lead_id,
+        )
+    ).scalar_one_or_none()
+    if enrollment is None:
+        raise HTTPException(status_code=404, detail="enrollment not found")
+    return enrollment
+
+
+@router.post("/ui/leads/{lead_id}/sequences/{enrollment_id}/opt-out")
+def opt_out_sequence_ui(
+    lead_id: uuid.UUID,
+    enrollment_id: uuid.UUID,
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> RedirectResponse:
+    enrollment = _get_enrollment_or_404(session, ui_session, lead_id, enrollment_id)
+    opt_out_enrollment(session, enrollment)
+    session.commit()
+    return redirect_with_flash(f"/ui/leads/{lead_id}", "シーケンスへの登録を解除しました")
+
+
+def _get_draft_or_404(
+    session: Session, ui_session: UiSession, lead_id: uuid.UUID, draft_id: uuid.UUID,
+) -> SequenceDraft:
+    draft = session.execute(
+        select(SequenceDraft).join(
+            SequenceEnrollment, SequenceDraft.enrollment_id == SequenceEnrollment.id,
+        ).where(
+            SequenceDraft.tenant_id == ui_session.tenant_id, SequenceDraft.id == draft_id,
+            SequenceEnrollment.lead_id == lead_id,
+        )
+    ).scalar_one_or_none()
+    if draft is None:
+        raise HTTPException(status_code=404, detail="draft not found")
+    return draft
+
+
+@router.post("/ui/leads/{lead_id}/drafts/{draft_id}/review")
+def review_draft_ui(
+    lead_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> RedirectResponse:
+    draft = _get_draft_or_404(session, ui_session, lead_id, draft_id)
+    mark_draft_reviewed(draft, reviewed_by=f"human:{ui_session.actor_id}")
+    session.commit()
+    return redirect_with_flash(f"/ui/leads/{lead_id}", "レビュー済みにしました")
+
+
+@router.post("/ui/leads/{lead_id}/drafts/{draft_id}/dismiss")
+def dismiss_draft_ui(
+    lead_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> RedirectResponse:
+    draft = _get_draft_or_404(session, ui_session, lead_id, draft_id)
+    dismiss_draft(draft, reviewed_by=f"human:{ui_session.actor_id}")
+    session.commit()
+    return redirect_with_flash(f"/ui/leads/{lead_id}", "このステップは送らないことにしました")

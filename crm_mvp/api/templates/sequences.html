@@ -1,0 +1,83 @@
+{% extends "_base.html" %}
+
+{% block title %}シーケンス | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<h1>アウトバウンド・シーケンス</h1>
+<p class="subtitle">
+  下書き止まりです。実際の送信基盤は未接続のため、生成された内容はLead詳細画面でレビューして手動で対応してください。
+</p>
+
+<div class="card">
+  <form method="post" action="/ui/sequences/generate-due" class="inline">
+    <button type="submit" class="btn quick-btn">本日分のドラフトを生成する</button>
+  </form>
+  <span class="muted" style="font-size:12px; margin-left:8px;">next_action_atが到来した登録分をまとめて処理します</span>
+</div>
+
+{% if rows %}
+<div class="card" style="padding:0;">
+  <table>
+    <thead><tr><th>名前</th><th>説明</th><th>ステップ数</th><th>実行中</th></tr></thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>{{ row.sequence.name }}</td>
+        <td class="muted">{{ row.sequence.description or "—" }}</td>
+        <td class="mono">{{ row.step_count }}</td>
+        <td class="mono">{{ row.active_count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card"><div class="empty-state">まだシーケンスがありません。下のフォームから作成してください。</div></div>
+{% endif %}
+
+<div class="card">
+  <h2>+ 新規シーケンス</h2>
+  <form method="post" action="/ui/sequences/new">
+    <div class="field-row">
+      <div>
+        <label for="name">名前</label>
+        <input type="text" id="name" name="name" required placeholder="例: 製造業向け新規開拓 3ステップ">
+      </div>
+      <div>
+        <label for="description">説明(任意)</label>
+        <input type="text" id="description" name="description">
+      </div>
+    </div>
+
+    <p class="subtitle" style="margin:14px 0 8px;">
+      ステップ(空欄の行は無視されます)。本文には {{ '{{full_name}}' }} / {{ '{{company_name}}' }} /
+      {{ '{{title}}' }} / {{ '{{recent_signal}}' }}(直近の高関心度シグナル)が使えます。
+    </p>
+    {% for i in step_row_range %}
+    <div style="border-top:1px solid #eee; padding-top:10px; margin-top:10px;">
+      <div class="field-row">
+        <div>
+          <label for="channel_{{ i }}">ステップ{{ i + 1 }} 種別</label>
+          <select id="channel_{{ i }}" name="channel_{{ i }}">
+            <option value="">(未使用)</option>
+            {% for c in step_channels %}
+            <option value="{{ c.value }}">{{ step_channel_labels.get(c.value, c.value) }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="delay_days_{{ i }}">遅延日数(前ステップから)</label>
+          <input type="text" id="delay_days_{{ i }}" name="delay_days_{{ i }}" value="{{ 0 if i == 0 else 3 }}">
+        </div>
+      </div>
+      <label for="subject_{{ i }}">件名(メールの場合のみ)</label>
+      <input type="text" id="subject_{{ i }}" name="subject_{{ i }}">
+      <label for="body_{{ i }}">本文</label>
+      <textarea id="body_{{ i }}" name="body_{{ i }}" style="min-height:70px;"></textarea>
+    </div>
+    {% endfor %}
+
+    <button type="submit" class="btn" style="margin-top:10px;">シーケンスを作成</button>
+  </form>
+</div>
+{% endblock %}

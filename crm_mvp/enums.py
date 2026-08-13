@@ -200,3 +200,25 @@ class CampaignChannelType(StrEnum):
     PAID_ADS = "paid_ads"
     OUTBOUND_SEQUENCE = "outbound_sequence"
     PARTNER = "partner"
+
+
+class SequenceStepChannel(StrEnum):
+    """アウトバウンド・シーケンスの1ステップの実行チャネル。"""
+
+    EMAIL = "email"
+    CALL_TASK = "call_task"
+    LINKEDIN = "linkedin"
+
+
+class SequenceEnrollmentStatus(StrEnum):
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    OPTED_OUT = "opted_out"
+
+
+class SequenceDraftStatus(StrEnum):
+    """送信基盤が未接続のため、常に下書き止まり(実送信は行わない)。"""
+
+    DRAFT = "draft"
+    REVIEWED = "reviewed"      # IS担当者が確認し、手動で対応した
+    DISMISSED = "dismissed"    # このステップは送らないと判断した

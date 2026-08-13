@@ -109,4 +109,77 @@
   <div class="empty-state">まだ接点が記録されていません。</div>
   {% endif %}
 </div>
+
+<!-- アウトバウンド・シーケンス(下書き止まり) -->
+<div class="card">
+  <h2>アウトバウンド・シーケンス</h2>
+  <p class="subtitle" style="margin-bottom:12px;">
+    下書き止まりです。実際の送信は行いません(送信基盤は未接続)。
+  </p>
+
+  {% if available_sequences %}
+  <form method="post" action="/ui/leads/{{ lead.id }}/sequences" style="margin-bottom:16px; max-width:420px;">
+    <label for="sequence_id">シーケンスに登録する</label>
+    <div class="field-row" style="align-items:end;">
+      <select id="sequence_id" name="sequence_id" style="margin-bottom:14px;">
+        {% for s in available_sequences %}
+        <option value="{{ s.id }}">{{ s.name }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="btn btn-sm" style="margin-bottom:14px;">登録</button>
+    </div>
+  </form>
+  {% else %}
+  <p class="muted" style="font-size:13px;">
+    利用可能なシーケンスがありません。<a href="/ui/sequences">シーケンスを作成する</a>
+  </p>
+  {% endif %}
+
+  {% if enrollments %}
+  <table style="margin-bottom:16px;">
+    <thead><tr><th>シーケンス</th><th>状態</th><th>次の実行予定</th><th></th></tr></thead>
+    <tbody>
+      {% for e in enrollments %}
+      <tr>
+        <td>{{ sequence_names.get(e.sequence_id, "—") }}</td>
+        <td>{{ e.status }}</td>
+        <td class="mono" style="font-size:11px;">{{ e.next_action_at.strftime("%Y-%m-%d") if e.next_action_at else "—" }}</td>
+        <td>
+          {% if e.status == active_enrollment_status %}
+          <form method="post" action="/ui/leads/{{ lead.id }}/sequences/{{ e.id }}/opt-out" class="inline">
+            <button type="submit" class="btn btn-sm btn-secondary">登録解除</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if drafts %}
+  <h2 style="margin-top:8px;">生成されたドラフト({{ drafts | length }}件)</h2>
+  {% for d in drafts %}
+  <div style="border-top:1px solid #eee; padding:12px 0;">
+    <div>
+      <strong>{{ step_channel_labels.get(d.channel, d.channel) }}</strong>
+      <span class="muted" style="font-size:12px;">{{ d.generated_at.strftime("%Y-%m-%d %H:%M") }} / {{ d.status }}</span>
+    </div>
+    {% if d.subject %}<div style="font-size:13px; font-weight:600; margin-top:6px;">件名: {{ d.subject }}</div>{% endif %}
+    <div class="quote-box" style="white-space:pre-wrap;">{{ d.body }}</div>
+    {% if d.personalization_note %}<p class="muted" style="font-size:11px;">{{ d.personalization_note }}</p>{% endif %}
+    {% if d.status == "draft" %}
+    <div style="margin-top:8px; display:flex; gap:10px;">
+      <form method="post" action="/ui/leads/{{ lead.id }}/drafts/{{ d.id }}/review" class="inline">
+        <button type="submit" class="btn btn-sm">レビュー済みにする</button>
+      </form>
+      <form method="post" action="/ui/leads/{{ lead.id }}/drafts/{{ d.id }}/dismiss" class="inline">
+        <button type="submit" class="btn btn-sm btn-secondary">送らない</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% endif %}
+</div>
 {% endblock %}

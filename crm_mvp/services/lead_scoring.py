@@ -28,8 +28,8 @@ HIGH_INTENT_CHANNELS: frozenset[TouchChannel] = frozenset({
 })
 
 SENIOR_TITLE_KEYWORDS: tuple[str, ...] = (
-    "社長", "取締役", "本部長", "部長", "課長", "室長", "マネージャー", "リーダー",
-    "CEO", "COO", "CTO", "CFO",
+    "社長", "取締役", "本部長", "工場長", "部長", "課長", "室長",
+    "マネージャー", "リーダー", "CEO", "COO", "CTO", "CFO",
 )
 
 

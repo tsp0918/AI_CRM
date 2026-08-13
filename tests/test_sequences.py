@@ -1,0 +1,232 @@
+"""sequences.py のユニットテスト。"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from crm_mvp.enums import (
+    SequenceDraftStatus, SequenceEnrollmentStatus, SequenceStepChannel, TouchChannel,
+)
+from crm_mvp.models import Lead, SequenceDraft, SequenceEnrollment, SequenceStep, Touch
+from crm_mvp.services import sequences as sq
+from crm_mvp.services.lead_lifecycle import record_touch
+
+NOW = datetime(2026, 8, 13, tzinfo=timezone.utc)
+
+DEMO_STEPS = [
+    {"channel": SequenceStepChannel.EMAIL, "delay_days": 0,
+     "subject_template": "{{company_name}}様へのご案内",
+     "body_template": "{{full_name}}様\n\nお世話になっております。"},
+    {"channel": SequenceStepChannel.CALL_TASK, "delay_days": 3,
+     "body_template": "{{full_name}}様へ架電する。"},
+    {"channel": SequenceStepChannel.EMAIL, "delay_days": 4,
+     "subject_template": "フォローアップ",
+     "body_template": "{{full_name}}様\n\n{{recent_signal}}を拝見しました。"},
+]
+
+
+def make_lead(db_session, tenant_id, **overrides) -> Lead:
+    defaults = dict(
+        tenant_id=tenant_id, company_name="山田電子工業株式会社",
+        full_name="山田 太郎", title="購買部長", written_by="human:sdr-1",
+    )
+    defaults.update(overrides)
+    lead = Lead(**defaults)
+    db_session.add(lead)
+    db_session.flush()
+    return lead
+
+
+class TestRenderStep:
+    def test_substitutes_known_placeholders(self, db_session, tenant_id):
+        lead = make_lead(db_session, tenant_id)
+        sequence = sq.create_sequence(
+            db_session, tenant_id, name="テスト", description=None,
+            steps=DEMO_STEPS, actor="human:m",
+        )
+        steps = db_session.query(SequenceStep).filter_by(
+            tenant_id=tenant_id, sequence_id=sequence.id,
+        ).order_by(SequenceStep.step_order).all()
+
+        subject, body, note = sq.render_step(steps[0], lead, [])
+        assert subject == "山田電子工業株式会社様へのご案内"
+        assert "山田 太郎様" in body
+        assert note is None
+
+    def test_recent_signal_is_pulled_from_high_intent_touch(self, db_session, tenant_id):
+        lead = make_lead(db_session, tenant_id)
+        touch = Touch(
+            channel=TouchChannel.CONTENT_DOWNLOAD,
+            occurred_at=NOW - timedelta(days=2),
+        )
+        subject, body, note = sq.render_step(
+            sq.SequenceStep(
+                channel=SequenceStepChannel.EMAIL, delay_days=0,
+                subject_template=None, body_template="{{recent_signal}}について",
+            ),
+            lead, [touch],
+        )
+        assert "content_download" in body
+        assert note is not None
+
+    def test_no_touches_leaves_recent_signal_blank(self, db_session, tenant_id):
+        lead = make_lead(db_session, tenant_id)
+        _, body, note = sq.render_step(
+            sq.SequenceStep(
+                channel=SequenceStepChannel.EMAIL, delay_days=0,
+                subject_template=None, body_template="[{{recent_signal}}]",
+            ),
+            lead, [],
+        )
+        assert body == "[]"
+        assert note is None
+
+
+class TestCreateSequenceAndEnroll:
+    def test_create_sequence_persists_ordered_steps(self, db_session, tenant_id):
+        sequence = sq.create_sequence(
+            db_session, tenant_id, name="新規開拓3ステップ", description="製造業向け",
+            steps=DEMO_STEPS, actor="human:m",
+        )
+        db_session.commit()
+
+        steps = db_session.query(SequenceStep).filter_by(
+            tenant_id=tenant_id, sequence_id=sequence.id,
+        ).order_by(SequenceStep.step_order).all()
+        assert [s.step_order for s in steps] == [0, 1, 2]
+        assert steps[1].channel == "call_task"
+
+    def test_enroll_sets_next_action_at_from_first_step_delay(self, db_session, tenant_id):
+        lead = make_lead(db_session, tenant_id)
+        sequence = sq.create_sequence(
+            db_session, tenant_id, name="S", description=None,
+            steps=DEMO_STEPS, actor="human:m",
+        )
+        enrollment = sq.enroll_lead(db_session, tenant_id, lead, sequence, actor="human:m", now=NOW)
+        db_session.commit()
+
+        assert enrollment.status == SequenceEnrollmentStatus.ACTIVE
+        assert enrollment.current_step_order == 0
+        # 1件目の delay_days=0 なのですぐ発火可能
+        assert enrollment.next_action_at == NOW
+
+    def test_double_enroll_raises(self, db_session, tenant_id):
+        lead = make_lead(db_session, tenant_id)
+        sequence = sq.create_sequence(
+            db_session, tenant_id, name="S", description=None,
+            steps=DEMO_STEPS, actor="human:m",
+        )
+        sq.enroll_lead(db_session, tenant_id, lead, sequence, actor="human:m", now=NOW)
+        db_session.flush()
+
+        with pytest.raises(ValueError):
+            sq.enroll_lead(db_session, tenant_id, lead, sequence, actor="human:m", now=NOW)
+
+
+class TestGenerateDueDrafts:
+    def test_generates_first_step_and_advances_enrollment(self, db_session, tenant_id):
+        lead = make_lead(db_session, tenant_id)
+        sequence = sq.create_sequence(
+            db_session, tenant_id, name="S", description=None,
+            steps=DEMO_STEPS, actor="human:m",
+        )
+        enrollment = sq.enroll_lead(db_session, tenant_id, lead, sequence, actor="human:m", now=NOW)
+        db_session.flush()
+
+        drafts = sq.generate_due_drafts(db_session, tenant_id, now=NOW)
+        db_session.commit()
+
+        assert len(drafts) == 1
+        assert drafts[0].channel == "email"
+        db_session.refresh(enrollment)
+        assert enrollment.current_step_order == 1
+        assert enrollment.next_action_at == NOW + timedelta(days=3)
+
+    def test_not_due_yet_generates_nothing(self, db_session, tenant_id):
+        lead = make_lead(db_session, tenant_id)
+        sequence = sq.create_sequence(
+            db_session, tenant_id, name="S", description=None,
+            steps=[{"channel": SequenceStepChannel.EMAIL, "delay_days": 10,
+                    "body_template": "{{full_name}}"}],
+            actor="human:m",
+        )
+        sq.enroll_lead(db_session, tenant_id, lead, sequence, actor="human:m", now=NOW)
+        db_session.flush()
+
+        drafts = sq.generate_due_drafts(db_session, tenant_id, now=NOW)
+        assert drafts == []
+
+    def test_completes_enrollment_after_last_step(self, db_session, tenant_id):
+        lead = make_lead(db_session, tenant_id)
+        sequence = sq.create_sequence(
+            db_session, tenant_id, name="S", description=None,
+            steps=[{"channel": SequenceStepChannel.EMAIL, "delay_days": 0,
+                    "body_template": "{{full_name}}"}],
+            actor="human:m",
+        )
+        enrollment = sq.enroll_lead(db_session, tenant_id, lead, sequence, actor="human:m", now=NOW)
+        db_session.flush()
+
+        sq.generate_due_drafts(db_session, tenant_id, now=NOW)
+        db_session.commit()
+
+        db_session.refresh(enrollment)
+        assert enrollment.status == SequenceEnrollmentStatus.COMPLETED
+        assert enrollment.next_action_at is None
+
+    def test_uses_real_touches_for_personalization(self, db_session, tenant_id):
+        lead = make_lead(db_session, tenant_id)
+        record_touch(
+            db_session, tenant_id, lead, channel=TouchChannel.CONTENT_DOWNLOAD,
+            occurred_at=NOW - timedelta(days=1),
+        )
+        sequence = sq.create_sequence(
+            db_session, tenant_id, name="S", description=None,
+            steps=[{"channel": SequenceStepChannel.EMAIL, "delay_days": 0,
+                    "body_template": "{{recent_signal}}"}],
+            actor="human:m",
+        )
+        sq.enroll_lead(db_session, tenant_id, lead, sequence, actor="human:m", now=NOW)
+        db_session.flush()
+
+        drafts = sq.generate_due_drafts(db_session, tenant_id, now=NOW)
+        assert "content_download" in drafts[0].body
+
+
+class TestReviewAndDismiss:
+    def test_mark_reviewed_sets_status_and_reviewer(self, db_session, tenant_id):
+        lead = make_lead(db_session, tenant_id)
+        sequence = sq.create_sequence(
+            db_session, tenant_id, name="S", description=None,
+            steps=[{"channel": SequenceStepChannel.EMAIL, "delay_days": 0,
+                    "body_template": "x"}],
+            actor="human:m",
+        )
+        sq.enroll_lead(db_session, tenant_id, lead, sequence, actor="human:m", now=NOW)
+        db_session.flush()
+        draft = sq.generate_due_drafts(db_session, tenant_id, now=NOW)[0]
+
+        sq.mark_draft_reviewed(draft, reviewed_by="human:is-1", now=NOW)
+        db_session.commit()
+
+        assert draft.status == SequenceDraftStatus.REVIEWED
+        assert draft.reviewed_by == "human:is-1"
+
+    def test_dismiss_sets_status(self, db_session, tenant_id):
+        lead = make_lead(db_session, tenant_id)
+        sequence = sq.create_sequence(
+            db_session, tenant_id, name="S", description=None,
+            steps=[{"channel": SequenceStepChannel.EMAIL, "delay_days": 0,
+                    "body_template": "x"}],
+            actor="human:m",
+        )
+        sq.enroll_lead(db_session, tenant_id, lead, sequence, actor="human:m", now=NOW)
+        db_session.flush()
+        draft = sq.generate_due_drafts(db_session, tenant_id, now=NOW)[0]
+
+        sq.dismiss_draft(draft, reviewed_by="human:is-1", now=NOW)
+        db_session.commit()
+
+        assert draft.status == SequenceDraftStatus.DISMISSED
