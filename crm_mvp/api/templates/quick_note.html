@@ -6,7 +6,7 @@
 <h1>⚡ クイック入力</h1>
 <p class="subtitle">案件を選んで、思い出せるうちにそのまま書くだけ。種別選択や出席者欄は省略しています。</p>
 
-{% if not engagements %}
+{% if not own_engagements and not other_engagements %}
 <div class="card">
   <div class="empty-state">
     先に <a href="/ui/engagements/new">+ 新規案件</a> を作成してください。
@@ -18,9 +18,22 @@
     <label for="engagement_id">案件</label>
     <select id="engagement_id" name="engagement_id" required>
       <option value="">選択してください</option>
-      {% for e in engagements %}
+      {% if own_engagements %}
+      <optgroup label="自分の担当">
+        {% for e in own_engagements %}
+        <option value="{{ e.id }}" {% if preselected_engagement_id == e.id|string %}selected{% endif %}>{{ e.name }}</option>
+        {% endfor %}
+      </optgroup>
+      <optgroup label="その他(直近更新)">
+        {% for e in other_engagements %}
+        <option value="{{ e.id }}" {% if preselected_engagement_id == e.id|string %}selected{% endif %}>{{ e.name }}</option>
+        {% endfor %}
+      </optgroup>
+      {% else %}
+      {% for e in other_engagements %}
       <option value="{{ e.id }}" {% if preselected_engagement_id == e.id|string %}selected{% endif %}>{{ e.name }}</option>
       {% endfor %}
+      {% endif %}
     </select>
 
     <label for="raw_text">今の内容をそのまま</label>

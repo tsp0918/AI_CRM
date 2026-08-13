@@ -126,21 +126,40 @@ def source_new_submit(
 def quick_note_form(
     request: Request,
     engagement_id: str = "",
+    owner_user_id: str = "",
     flash: str | None = None,
     flash_type: str = "info",
     ui_session: UiSession = Depends(require_ui_session),
     session: Session = Depends(get_ui_db_session),
 ) -> HTMLResponse:
-    engagements = session.execute(
-        select(Engagement).where(Engagement.tenant_id == ui_session.tenant_id)
-        .order_by(Engagement.updated_at.desc()).limit(20)
-    ).scalars().all()
+    # 2026-08-14: owner_user_id が付いていれば(ダッシュボードの担当者
+    # 絞り込みからサイドバー経由で遷移してきた場合)、その担当者の案件を
+    # 「自分の担当」として先に出す。付いていなければ今まで通りフラットな
+    # 直近更新20件のみ(後方互換)。
+    own_engagements: list[Engagement] = []
+    if owner_user_id:
+        own_engagements = session.execute(
+            select(Engagement).where(
+                Engagement.tenant_id == ui_session.tenant_id,
+                Engagement.owner_user_id == uuid.UUID(owner_user_id),
+            ).order_by(Engagement.updated_at.desc())
+        ).scalars().all()
+    own_ids = {e.id for e in own_engagements}
+
+    other_engagements = [
+        e for e in session.execute(
+            select(Engagement).where(Engagement.tenant_id == ui_session.tenant_id)
+            .order_by(Engagement.updated_at.desc()).limit(20)
+        ).scalars().all()
+        if e.id not in own_ids
+    ]
 
     context = base_context(
         session, ui_session, active_nav="quick_note", flash=flash, flash_type=flash_type,
     )
     context.update({
-        "engagements": engagements, "preselected_engagement_id": engagement_id,
+        "own_engagements": own_engagements, "other_engagements": other_engagements,
+        "preselected_engagement_id": engagement_id,
     })
     return templates.TemplateResponse(request, "quick_note.html", context)
 

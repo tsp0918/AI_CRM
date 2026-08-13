@@ -186,6 +186,19 @@ class TestEngagementDetail:
         resp = ui_client.get(f"/ui/engagements/{engagement.id}")
         assert resp.status_code == 404
 
+    def test_section_nav_ids_match_anchors(self, ui_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        resp = ui_client.get(f"/ui/engagements/{engagement.id}")
+        assert resp.status_code == 200
+        assert 'class="section-nav"' in resp.text
+        for section_id in ["score", "activity", "line-items", "quotes", "contracts",
+                            "child-engagements", "stage", "qualification", "proposals",
+                            "sources", "graph"]:
+            assert f'href="#{section_id}"' in resp.text
+            assert f'id="{section_id}"' in resp.text
+
 
 class TestSourceIntake:
     def test_submits_and_processes_source(self, ui_client, db_session, tenant_id):
@@ -315,6 +328,39 @@ class TestQuickNote:
         assert db_session.query(IngestionSource).filter_by(
             tenant_id=tenant_id, engagement_id=engagement.id,
         ).count() == 0
+
+    def test_no_owner_filter_is_flat_list(self, ui_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        resp = ui_client.get("/ui/quick-note")
+        assert resp.status_code == 200
+        assert "<optgroup" not in resp.text
+        assert engagement.name in resp.text
+
+    def test_owner_filter_groups_into_optgroups(self, ui_client, db_session, tenant_id):
+        from crm_mvp.models import User
+
+        owner = User(
+            tenant_id=tenant_id, name="担当A", email="qn-a@example.com",
+            function="Sales", role="BDM",
+        )
+        db_session.add(owner)
+        db_session.flush()
+        _, mine = create_account_and_engagement(db_session, tenant_id)
+        mine.name = "自分の案件"
+        mine.owner_user_id = owner.id
+        _, others = create_account_and_engagement(db_session, tenant_id)
+        others.name = "他人の案件"
+        db_session.commit()
+
+        resp = ui_client.get(f"/ui/quick-note?owner_user_id={owner.id}")
+        assert resp.status_code == 200
+        assert '<optgroup label="自分の担当">' in resp.text
+        assert '<optgroup label="その他(直近更新)">' in resp.text
+        own_section = resp.text.split('その他(直近更新)')[0]
+        assert "自分の案件" in own_section
+        assert "他人の案件" not in own_section
 
 
 class TestProposalInbox:
@@ -686,3 +732,22 @@ class TestSidebarNav:
         resp = ui_client.get("/ui/")
         assert resp.status_code == 200
         assert "<details open>" not in resp.text
+
+    def test_quick_note_link_has_no_owner_param_by_default(self, ui_client):
+        resp = ui_client.get("/ui/")
+        assert resp.status_code == 200
+        assert 'href="/ui/quick-note"' in resp.text
+
+    def test_quick_note_link_propagates_owner_param(self, ui_client, db_session, tenant_id):
+        from crm_mvp.models import User
+
+        owner = User(
+            tenant_id=tenant_id, name="担当A", email="nav-a@example.com",
+            function="Sales", role="BDM",
+        )
+        db_session.add(owner)
+        db_session.commit()
+
+        resp = ui_client.get(f"/ui/?owner_user_id={owner.id}")
+        assert resp.status_code == 200
+        assert f'href="/ui/quick-note?owner_user_id={owner.id}"' in resp.text

@@ -39,8 +39,24 @@
   </details>
 </p>
 
+<nav class="section-nav">
+  <a href="#score">スコア</a>
+  {% if originating_lead %}<a href="#lead-origin">リード起源</a>{% endif %}
+  <a href="#activity">活動</a>
+  <a href="#line-items">商品構成</a>
+  <a href="#quotes">見積</a>
+  <a href="#contracts">契約</a>
+  <a href="#child-engagements">派生商談</a>
+  <a href="#stage">ステージ</a>
+  {% if open_actions %}<a href="#actions">アクション</a>{% endif %}
+  <a href="#qualification">クオリフィケーション</a>
+  <a href="#proposals">提案待ち</a>
+  <a href="#sources">取込情報</a>
+  <a href="#graph">相関図</a>
+</nav>
+
 <!-- 客観的クロージング確度スコア -->
-<div class="card">
+<div class="card" id="score">
   <div class="score-hero">
     <div class="score-num score-badge-{{ score.band }}">{{ score.total }}</div>
     <div class="score-hero-body">
@@ -70,7 +86,7 @@
 {% if originating_lead %}
 {% set snap = originating_lead.conversion_snapshot %}
 <!-- リード発生経緯(案件化した瞬間のリードサマリー) -->
-<div class="card">
+<div class="card" id="lead-origin">
   <h2>リード発生経緯</h2>
   <p class="subtitle" style="margin-bottom:12px;">
     <a href="/ui/leads/{{ originating_lead.id }}">{{ originating_lead.full_name }}</a> 様のリードから、
@@ -114,7 +130,7 @@
 {% endif %}
 
 <!-- 最近の活動 -->
-<div class="card">
+<div class="card" id="activity">
   <h2>最近の活動</h2>
   {% if recent_activity %}
     <table>
@@ -137,7 +153,7 @@
 </div>
 
 <!-- 商品構成(EngagementLineItem) -->
-<div class="card">
+<div class="card" id="line-items">
   <h2>商品構成</h2>
   {% if line_items %}
   <table>
@@ -225,7 +241,7 @@
 </div>
 
 <!-- 見積もり -->
-<div class="card">
+<div class="card" id="quotes">
   <h2>見積もり({{ quotes | length }}件)</h2>
   {% if quotes %}
   {% for q in quotes %}
@@ -281,7 +297,7 @@
 </div>
 
 <!-- 契約 -->
-<div class="card">
+<div class="card" id="contracts">
   <h2>契約({{ contracts | length }}件)</h2>
   {% if contracts %}
   {% for c in contracts %}
@@ -354,7 +370,7 @@
 </div>
 
 <!-- 派生商談(継続/Upsell/Cross-sell) -->
-<div class="card">
+<div class="card" id="child-engagements">
   <h2>派生商談(継続/Upsell/Cross-sell)</h2>
   <p class="subtitle" style="margin-bottom:12px;">
     この商談を起点にした継続(更新)・Upsell・Cross-sellの商談です。
@@ -396,7 +412,7 @@
 </div>
 
 <!-- ステージ / ゲート -->
-<div class="card">
+<div class="card" id="stage">
   <h2>ステージ</h2>
 
   {% if target_stage %}
@@ -486,7 +502,7 @@
 
 <!-- アサイン済みのアクション -->
 {% if open_actions %}
-<div class="card">
+<div class="card" id="actions">
   <h2>アサイン済みのアクション({{ open_actions | length }}件)</h2>
   {% for a in open_actions %}
   <div style="border-top:1px solid #eee; padding:12px 0;">
@@ -507,7 +523,7 @@
 {% endif %}
 
 <!-- クオリフィケーション -->
-<div class="card">
+<div class="card" id="qualification">
   <h2>クオリフィケーション状況(MEDDPICC / BANT)</h2>
   <table>
     <thead><tr><th>項目</th><th>値</th><th>根拠</th><th>証拠強度</th><th>失効日</th><th></th></tr></thead>
@@ -566,7 +582,7 @@
 </div>
 
 <!-- 提案承認 -->
-<div class="card">
+<div class="card" id="proposals">
   <h2>この案件の提案待ち({{ pending_proposals | length }}件)</h2>
   {% if pending_proposals %}
     {% for p in pending_proposals %}
@@ -593,7 +609,7 @@
 </div>
 
 <!-- 情報投入 -->
-<div class="card">
+<div class="card" id="sources">
   <h2>取り込んだ情報</h2>
   <p><a href="/ui/sources/new?engagement_id={{ engagement.id }}" class="btn btn-sm">+ 情報を投入する</a></p>
   {% if sources %}
@@ -615,7 +631,7 @@
 </div>
 
 <!-- 相関図 -->
-<div class="card">
+<div class="card" id="graph">
   <h2>バイヤー相関図</h2>
   <p class="subtitle" style="margin-bottom:12px;">登場人物 {{ node_count }} 名</p>
   <a href="/ui/engagements/{{ engagement.id }}/graph" class="btn btn-sm btn-secondary">相関図を見る</a>

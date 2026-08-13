@@ -96,7 +96,32 @@
       border-radius: 10px;
       padding: 16px 18px;
       margin-bottom: 20px;
+      scroll-margin-top: 56px;
     }
+
+    /* 商談詳細ページ等、長い縦スクロールになりやすいページ用の
+       セクション目次(スティッキー)。アンカーリンクでジャンプする。 */
+    .section-nav {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      background: #f5f6f8;
+      padding: 10px 0;
+      margin-bottom: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .section-nav a {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: white;
+      border: 1px solid #e5e7eb;
+      color: #374151;
+    }
+    .section-nav a:hover { background: #eff6ff; border-color: #bfdbfe; text-decoration: none; }
 
     table { border-collapse: collapse; width: 100%; font-size: 13px; }
     th, td { text-align: left; padding: 8px 10px; border-top: 1px solid #eee; }
@@ -239,6 +264,8 @@
       .card { padding: 14px 14px; }
       .field-row { flex-direction: column; gap: 0; }
       .filter-bar { align-items: stretch; }
+      .section-nav { flex-wrap: nowrap; overflow-x: auto; }
+      .section-nav a { white-space: nowrap; }
       table { display: block; overflow-x: auto; white-space: nowrap; }
       .btn { padding: 10px 16px; font-size: 14px; }
       input[type=text], input[type=url], textarea, select { font-size: 16px; }
@@ -252,8 +279,9 @@
   <nav class="sidebar">
     <span class="sidebar-brand">Agentic CRM</span>
 
+    {% set current_owner_qs = request.query_params.get('owner_user_id') %}
     <a href="/ui/" class="{% if active_nav == 'dashboard' %}active{% endif %}">ダッシュボード</a>
-    <a href="/ui/quick-note" class="{% if active_nav == 'quick_note' %}active{% endif %}">⚡ クイック入力</a>
+    <a href="/ui/quick-note{% if current_owner_qs %}?owner_user_id={{ current_owner_qs }}{% endif %}" class="{% if active_nav == 'quick_note' %}active{% endif %}">⚡ クイック入力</a>
     <a href="/ui/engagements/new" class="{% if active_nav == 'new' %}active{% endif %}">+ 新規案件</a>
     <a href="/ui/proposals" class="{% if active_nav == 'proposals' %}active{% endif %}">
       提案承認{% if pending_count %}<span class="badge-count">{{ pending_count }}</span>{% endif %}
