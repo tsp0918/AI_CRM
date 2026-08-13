@@ -80,19 +80,29 @@ class DealBuilder:
         self, bp_code: str, engagement_name: str, created: datetime,
     ):
         """取引先は ErpBusinessPartner から実名を引いて Account を作る。
-        external_system/external_id で ERP側の bp_code に紐付ける。"""
+        external_system/external_id で ERP側の bp_code に紐付ける。同じ
+        bp_code で複数回呼んでも既存の Account を再利用する(同一取引先が
+        複数商談を持つのは普通のことで、Account を毎回複製すると
+        uq_account_external に違反する)。"""
         bp = self.session.execute(
             select(ErpBusinessPartner).where(
                 ErpBusinessPartner.tenant_id == TENANT_ID,
                 ErpBusinessPartner.bp_code == bp_code,
             )
         ).scalar_one()
-        account = Account(
-            tenant_id=TENANT_ID, name=bp.name, country=bp.country,
-            external_system="erp", external_id=bp.bp_code,
-        )
-        self.session.add(account)
-        self.session.flush()
+        account = self.session.execute(
+            select(Account).where(
+                Account.tenant_id == TENANT_ID, Account.external_system == "erp",
+                Account.external_id == bp.bp_code,
+            )
+        ).scalar_one_or_none()
+        if account is None:
+            account = Account(
+                tenant_id=TENANT_ID, name=bp.name, country=bp.country,
+                external_system="erp", external_id=bp.bp_code,
+            )
+            self.session.add(account)
+            self.session.flush()
         engagement = Engagement(
             tenant_id=TENANT_ID, account_id=account.id, name=engagement_name,
             stage=Stage.LEAD, created_at=created,
@@ -281,7 +291,10 @@ class DealBuilder:
             )
         ).scalar_one()
 
-    def wire_quote_and_contract(self, engagement, *, when: datetime):
+    def wire_quote_and_contract(
+        self, engagement, *, when: datetime,
+        start_date: date | None = None, end_date: date | None = None,
+    ):
         """商品構成が確定した受注案件に、見積もり(SENT→ACCEPTED)と
         契約(SIGNED→ACTIVE)まで実サービス経由で発行する。"""
         actor = f"human:{ACTOR_ID}"
@@ -294,7 +307,7 @@ class DealBuilder:
 
         contract = create_contract(
             self.session, TENANT_ID, engagement, quote=quote,
-            start_date=None, end_date=None, actor=actor,
+            start_date=start_date, end_date=end_date, actor=actor,
         )
         contract.created_at = when
         update_contract_status(contract, ContractStatus.SIGNED)
@@ -802,7 +815,11 @@ def build_deal_6_closed_won(b: DealBuilder):
     )
     b.advance(eng, Stage.CLOSED_WON, when=days_ago(20))
 
-    quote, contract = b.wire_quote_and_contract(eng, when=days_ago(19))
+    quote, contract = b.wire_quote_and_contract(
+        eng, when=days_ago(19),
+        start_date=(NOW - timedelta(days=19)).date(),
+        end_date=(NOW - timedelta(days=19) + timedelta(days=365)).date(),
+    )
     print(
         f"  {eng.name}: 見積もり {quote.quote_number}、契約 {contract.contract_number} "
         f"を発行しました(合計 {contract.total_amount:,.0f} {contract.currency})。"
