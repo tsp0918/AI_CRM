@@ -258,5 +258,7 @@ class FeftaJudgment(StrEnum):
 
     APPROVED = "APPROVED"
     APPLICABLE = "APPLICABLE"
+    PENDING = "PENDING"           # 審査中(実ERPエクスポートに実在。当初の設計メモには無かった)
+    REJECTED = "REJECTED"         # 却下
     UNKNOWN = "UNKNOWN"
     NOT_APPLICABLE = "NOT_APPLICABLE"
