@@ -95,6 +95,46 @@ class TestDashboard:
         assert engagement.name in resp.text
         assert resp.text.count("テスト案件") == 1
 
+    def test_hides_closed_deals_by_default(self, ui_client, db_session, tenant_id):
+        create_account_and_engagement(db_session, tenant_id, stage=Stage.LEAD)
+        _, closed = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
+        closed.name = "クローズ済み案件"
+        db_session.commit()
+
+        resp = ui_client.get("/ui/")
+        assert resp.status_code == 200
+        assert "クローズ済み案件" not in resp.text
+
+        resp_all = ui_client.get("/ui/?show_closed=true")
+        assert resp_all.status_code == 200
+        assert "クローズ済み案件" in resp_all.text
+
+    def test_filters_by_owner_user_id(self, ui_client, db_session, tenant_id):
+        from crm_mvp.models import User
+
+        user_a = User(
+            tenant_id=tenant_id, name="担当A", email="a@example.com",
+            function="Sales", role="BDM",
+        )
+        user_b = User(
+            tenant_id=tenant_id, name="担当B", email="b@example.com",
+            function="Sales", role="AM",
+        )
+        db_session.add_all([user_a, user_b])
+        db_session.flush()
+        _, eng_a = create_account_and_engagement(db_session, tenant_id)
+        eng_a.name = "Aの案件"
+        eng_a.owner_user_id = user_a.id
+        _, eng_b = create_account_and_engagement(db_session, tenant_id)
+        eng_b.name = "Bの案件"
+        eng_b.owner_user_id = user_b.id
+        db_session.commit()
+
+        resp = ui_client.get(f"/ui/?owner_user_id={user_a.id}")
+        assert resp.status_code == 200
+        assert "Aの案件" in resp.text
+        assert "Bの案件" not in resp.text
+
 
 class TestEngagementCreation:
     def test_new_engagement_form_renders(self, ui_client):
@@ -626,3 +666,23 @@ class TestActionItemUi:
         assert resp.status_code == 303
         db_session.refresh(item)
         assert item.status == "dismissed"
+
+
+class TestSidebarNav:
+    def test_active_page_gets_active_class(self, ui_client):
+        resp = ui_client.get("/ui/")
+        assert resp.status_code == 200
+        assert 'href="/ui/" class="active"' in resp.text
+        assert 'href="/ui/accounts" class="' in resp.text
+        assert 'href="/ui/accounts" class="active"' not in resp.text
+
+    def test_master_data_section_auto_expands_when_active(self, ui_client):
+        resp = ui_client.get("/ui/products")
+        assert resp.status_code == 200
+        assert "<details open>" in resp.text
+        assert 'href="/ui/products" class="active"' in resp.text
+
+    def test_master_data_section_collapsed_elsewhere(self, ui_client):
+        resp = ui_client.get("/ui/")
+        assert resp.status_code == 200
+        assert "<details open>" not in resp.text

@@ -4,7 +4,26 @@
 
 {% block content %}
 <h1>ダッシュボード</h1>
-<p class="subtitle">{{ rows | length }} 件の案件</p>
+<p class="subtitle">{{ rows | length }} 件の案件{% if not show_closed %}(進行中のみ表示中){% endif %}</p>
+
+<form method="get" action="/ui/" class="field-row filter-bar" style="max-width:520px; margin-bottom:16px;">
+  <div>
+    <label for="owner_user_id">担当者</label>
+    <select id="owner_user_id" name="owner_user_id" onchange="this.form.submit()">
+      <option value="">すべて</option>
+      {% for u in users %}
+      <option value="{{ u.id }}" {% if owner_user_id == u.id|string %}selected{% endif %}>{{ u.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div style="flex:none; padding-bottom:14px;">
+    <label style="display:inline-flex; align-items:center; gap:6px; font-weight:400; margin-bottom:0;">
+      <input type="checkbox" name="show_closed" value="true" style="width:auto; margin:0;"
+             {% if show_closed %}checked{% endif %} onchange="this.form.submit()">
+      クローズ済みも表示
+    </label>
+  </div>
+</form>
 
 {% if rows %}
 <div class="card" style="padding:0;">

@@ -15,28 +15,47 @@
     a { color: #2563eb; text-decoration: none; }
     a:hover { text-decoration: underline; }
 
-    /* ナビゲーション */
-    .topnav {
-      display: flex;
-      align-items: center;
-      gap: 20px;
-      padding: 0 20px;
-      height: 52px;
+    /* 全体シェル: 左サイドバー + 本文 */
+    .app-shell { display: flex; min-height: 100vh; align-items: flex-start; }
+    .main-area { flex: 1; min-width: 0; }
+
+    /* サイドバー */
+    .sidebar {
+      width: 220px;
+      flex-shrink: 0;
       background: #111827;
       color: #e5e7eb;
+      padding: 14px 10px;
+      display: flex;
+      flex-direction: column;
+      position: sticky;
+      top: 0;
+      min-height: 100vh;
     }
-    .topnav-brand { font-weight: 700; font-size: 14px; color: white; margin-right: 8px; }
-    .topnav a {
+    .sidebar-brand { font-weight: 700; font-size: 14px; color: white; padding: 4px 10px 14px; }
+    .sidebar-label {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+      color: #6b7280; font-weight: 600; padding: 14px 10px 6px;
+    }
+    .sidebar a, .sidebar summary {
+      display: block;
+      white-space: nowrap;
       color: #cbd5e1;
       font-size: 13px;
-      padding: 6px 10px;
+      padding: 7px 10px;
       border-radius: 6px;
       position: relative;
+      cursor: pointer;
     }
-    .topnav a:hover { text-decoration: none; background: #1f2937; color: white; }
-    .topnav a.active { background: #2563eb; color: white; }
-    .topnav-spacer { flex: 1; }
-    .topnav-actor { font-size: 12px; color: #9ca3af; display: flex; align-items: center; gap: 8px; }
+    .sidebar a:hover, .sidebar summary:hover { text-decoration: none; background: #1f2937; color: white; }
+    .sidebar a.active { background: #2563eb; color: white; }
+    .sidebar details > a { padding-left: 22px; }
+    .sidebar-spacer { flex: 1; }
+    .sidebar-actor {
+      font-size: 11px; color: #9ca3af; padding: 10px;
+      border-top: 1px solid #1f2937; margin-top: 8px;
+      display: flex; flex-direction: column; gap: 6px;
+    }
     .badge-count {
       display: inline-block;
       min-width: 16px;
@@ -51,7 +70,7 @@
     }
     .link-button {
       background: none; border: none; color: #9ca3af; font-size: 12px;
-      cursor: pointer; padding: 0; text-decoration: underline;
+      cursor: pointer; padding: 0; text-decoration: underline; text-align: left;
     }
     .link-button:hover { color: white; }
 
@@ -166,6 +185,7 @@
     textarea { resize: vertical; min-height: 90px; }
     .field-row { display: flex; gap: 16px; }
     .field-row > * { flex: 1; }
+    .filter-bar { align-items: flex-end; }
 
     .empty-state { color: #9ca3af; font-size: 13px; padding: 30px 0; text-align: center; }
     .muted { color: #9ca3af; }
@@ -206,15 +226,19 @@
     .pipeline-label { font-size: 11px; margin-top: 6px; text-align: center; color: #4b5563; max-width: 104px; }
     .pipeline-label .ch { display: block; color: #9ca3af; font-size: 10px; }
 
-    /* モバイル: 商談直後・移動中でも崩れず、タップしやすいサイズを保つ */
+    /* モバイル: 商談直後・移動中でも崩れず、タップしやすいサイズを保つ。
+       サイドバーは横に潰さず、本文の上に通常幅で縦積みする(グロナビが
+       文字化けしていた旧実装の反省を踏まえ、幅を確保できない場面では
+       横並びを維持しようとしないことを最優先にする)。 */
     @media (max-width: 640px) {
-      .topnav { flex-wrap: wrap; height: auto; padding: 10px 14px; row-gap: 8px; }
-      .topnav-spacer { flex-basis: 100%; height: 0; }
-      .topnav-actor { flex-wrap: wrap; font-size: 11px; }
+      .app-shell { flex-direction: column; align-items: stretch; }
+      .sidebar { width: 100%; position: static; min-height: 0; }
+      .main-area { min-width: 0; }
       main.page { padding: 16px 14px 48px; }
       h1 { font-size: 18px; }
       .card { padding: 14px 14px; }
       .field-row { flex-direction: column; gap: 0; }
+      .filter-bar { align-items: stretch; }
       table { display: block; overflow-x: auto; white-space: nowrap; }
       .btn { padding: 10px 16px; font-size: 14px; }
       input[type=text], input[type=url], textarea, select { font-size: 16px; }
@@ -223,31 +247,44 @@
   {% block extra_head %}{% endblock %}
 </head>
 <body>
+  <div class="app-shell">
   {% if ui_session %}
-  <nav class="topnav">
-    <span class="topnav-brand">Agentic CRM</span>
+  <nav class="sidebar">
+    <span class="sidebar-brand">Agentic CRM</span>
+
     <a href="/ui/" class="{% if active_nav == 'dashboard' %}active{% endif %}">ダッシュボード</a>
+    <a href="/ui/quick-note" class="{% if active_nav == 'quick_note' %}active{% endif %}">⚡ クイック入力</a>
+    <a href="/ui/engagements/new" class="{% if active_nav == 'new' %}active{% endif %}">+ 新規案件</a>
     <a href="/ui/proposals" class="{% if active_nav == 'proposals' %}active{% endif %}">
       提案承認{% if pending_count %}<span class="badge-count">{{ pending_count }}</span>{% endif %}
     </a>
-    <a href="/ui/forecast-risk" class="{% if active_nav == 'forecast_risk' %}active{% endif %}">リスクレーダー</a>
+
+    <div class="sidebar-label">案件・取引先</div>
     <a href="/ui/leads" class="{% if active_nav == 'leads' %}active{% endif %}">リード</a>
     <a href="/ui/accounts" class="{% if active_nav == 'accounts' %}active{% endif %}">取引先</a>
-    <a href="/ui/campaigns" class="{% if active_nav == 'campaigns' %}active{% endif %}">キャンペーン</a>
-    <a href="/ui/sequences" class="{% if active_nav == 'sequences' %}active{% endif %}">シーケンス</a>
-    <a href="/ui/erp-business-partners" class="{% if active_nav == 'erp_business_partners' %}active{% endif %}">ERP取引先</a>
-    <a href="/ui/erp-materials" class="{% if active_nav == 'erp_materials' %}active{% endif %}">ERP品目</a>
-    <a href="/ui/products" class="{% if active_nav == 'products' %}active{% endif %}">商品</a>
-    <a href="/ui/sales-groups" class="{% if active_nav == 'sales_groups' %}active{% endif %}">セールスグループ</a>
-    <a href="/ui/users" class="{% if active_nav == 'users' %}active{% endif %}">ユーザー</a>
     <a href="/ui/quotes" class="{% if active_nav == 'quotes' %}active{% endif %}">見積・契約</a>
     <a href="/ui/renewals" class="{% if active_nav == 'renewals' %}active{% endif %}">契約更新</a>
+
+    <div class="sidebar-label">マーケティング</div>
+    <a href="/ui/campaigns" class="{% if active_nav == 'campaigns' %}active{% endif %}">キャンペーン</a>
+    <a href="/ui/sequences" class="{% if active_nav == 'sequences' %}active{% endif %}">シーケンス</a>
+
+    <div class="sidebar-label">レポート</div>
     <a href="/ui/reports/revenue" class="{% if active_nav == 'revenue_report' %}active{% endif %}">売上レポート</a>
     <a href="/ui/reports/builder" class="{% if active_nav == 'report_builder' %}active{% endif %}">レポートビルダー</a>
-    <a href="/ui/quick-note" class="{% if active_nav == 'quick_note' %}active{% endif %}">⚡ クイック入力</a>
-    <a href="/ui/engagements/new" class="{% if active_nav == 'new' %}active{% endif %}">+ 新規案件</a>
-    <div class="topnav-spacer"></div>
-    <div class="topnav-actor">
+    <a href="/ui/forecast-risk" class="{% if active_nav == 'forecast_risk' %}active{% endif %}">リスクレーダー</a>
+
+    <details {% if active_nav in ['erp_business_partners', 'erp_materials', 'products', 'sales_groups', 'users'] %}open{% endif %}>
+      <summary class="sidebar-label" style="padding-left:10px; margin-top:6px;">マスタ管理</summary>
+      <a href="/ui/erp-business-partners" class="{% if active_nav == 'erp_business_partners' %}active{% endif %}">ERP取引先</a>
+      <a href="/ui/erp-materials" class="{% if active_nav == 'erp_materials' %}active{% endif %}">ERP品目</a>
+      <a href="/ui/products" class="{% if active_nav == 'products' %}active{% endif %}">商品</a>
+      <a href="/ui/sales-groups" class="{% if active_nav == 'sales_groups' %}active{% endif %}">セールスグループ</a>
+      <a href="/ui/users" class="{% if active_nav == 'users' %}active{% endif %}">ユーザー</a>
+    </details>
+
+    <div class="sidebar-spacer"></div>
+    <div class="sidebar-actor">
       <span>{{ ui_session.actor_name or "匿名ユーザー" }}</span>
       <span class="mono">tenant: {{ ui_session.tenant_id|string }}</span>
       <form class="inline" method="post" action="/ui/workspace/logout">
@@ -257,12 +294,15 @@
   </nav>
   {% endif %}
 
-  {% if flash_message %}
-  <div class="flash flash-{{ flash_type or 'info' }}">{{ flash_message }}</div>
-  {% endif %}
+  <div class="main-area">
+    {% if flash_message %}
+    <div class="flash flash-{{ flash_type or 'info' }}">{{ flash_message }}</div>
+    {% endif %}
 
-  <main class="page">
-    {% block content %}{% endblock %}
-  </main>
+    <main class="page">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  </div>
 </body>
 </html>
