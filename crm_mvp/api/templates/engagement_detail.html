@@ -42,11 +42,11 @@
 
 {% if originating_lead %}
 {% set snap = originating_lead.conversion_snapshot %}
-<!-- Lead発生経緯(案件化した瞬間のLeadサマリー) -->
+<!-- リード発生経緯(案件化した瞬間のリードサマリー) -->
 <div class="card">
-  <h2>Lead発生経緯</h2>
+  <h2>リード発生経緯</h2>
   <p class="subtitle" style="margin-bottom:12px;">
-    <a href="/ui/leads/{{ originating_lead.id }}">{{ originating_lead.full_name }}</a> 様のLeadから、
+    <a href="/ui/leads/{{ originating_lead.id }}">{{ originating_lead.full_name }}</a> 様のリードから、
     {{ originating_lead.converted_at.strftime("%Y-%m-%d") if originating_lead.converted_at else "—" }} に案件化されました。
   </p>
   {% if snap %}
@@ -66,7 +66,7 @@
   </div>
   {% if snap.touch_channel_counts %}
   <p class="subtitle" style="margin:12px 0 4px;">
-    案件化までの接点({{ snap.touch_count }}件・Leadとして{{ snap.days_as_lead }}日間)
+    案件化までの接点({{ snap.touch_count }}件・リードとして{{ snap.days_as_lead }}日間)
   </p>
   <ul style="font-size:13px; padding-left:18px; margin:0;">
     {% for ch, count in snap.touch_channel_counts.items() %}
@@ -82,7 +82,7 @@
   </ul>
   {% endif %}
   {% endif %}
-  <p style="margin-top:12px;"><a href="/ui/leads/{{ originating_lead.id }}">Lead詳細を見る(全接点・シーケンス履歴)&rarr;</a></p>
+  <p style="margin-top:12px;"><a href="/ui/leads/{{ originating_lead.id }}">リード詳細を見る(全接点・シーケンス履歴)&rarr;</a></p>
 </div>
 {% endif %}
 
@@ -106,6 +106,223 @@
     <p style="margin-top:10px;"><a href="/ui/engagements/{{ engagement.id }}/activity">すべての活動を見る &rarr;</a></p>
   {% else %}
     <div class="empty-state">まだ活動記録がありません。</div>
+  {% endif %}
+</div>
+
+<!-- 商品構成(EngagementLineItem) -->
+<div class="card">
+  <h2>商品構成</h2>
+  {% if line_items %}
+  <table>
+    <thead>
+      <tr><th>商品</th><th>数量</th><th>定価</th><th>値引率</th><th>単価</th><th>小計</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for li in line_items %}
+      <tr>
+        <td>{{ li.product_name_snapshot }}</td>
+        <td class="mono">{{ li.quantity }}</td>
+        <td class="mono">{{ "{:,.0f}".format(li.list_price_snapshot) }}</td>
+        <td class="mono">{{ li.discount_rate }}%</td>
+        <td class="mono">{{ "{:,.0f}".format(li.unit_price) }}</td>
+        <td class="mono">{{ "{:,.0f}".format(li.line_total) }}</td>
+        <td>
+          <form method="post" action="/ui/engagements/{{ engagement.id }}/line-items/{{ li.id }}/remove" class="inline">
+            <button type="submit" class="btn btn-sm btn-secondary">削除</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="5" style="text-align:right;"><strong>合計</strong></td>
+        <td class="mono"><strong>{{ "{:,.0f}".format(engagement.amount) if engagement.amount else "0" }} {{ engagement.currency }}</strong></td>
+        <td></td>
+      </tr>
+    </tfoot>
+  </table>
+  <p class="subtitle" style="margin-top:8px;">商品構成がある案件の金額はここから自動計算されます。金額を直接編集するには、すべての商品を削除してください。</p>
+  {% else %}
+  <div class="empty-state">まだ商品が追加されていません。</div>
+  {% endif %}
+
+  {% if available_products %}
+  <details style="margin-top:14px;">
+    <summary style="cursor:pointer; font-size:13px; color:#2563eb;">+ 商品を追加する</summary>
+    <form method="post" action="/ui/engagements/{{ engagement.id }}/line-items" style="margin-top:10px; max-width:480px;">
+      <label for="product_id">商品(価格表)</label>
+      <select id="product_id" name="product_id" required>
+        {% for p in available_products %}
+        <option value="{{ p.id }}">{{ p.name }}(定価 {{ "{:,.0f}".format(p.list_price) }} {{ p.currency }})</option>
+        {% endfor %}
+      </select>
+      <div class="field-row">
+        <div>
+          <label for="quantity">数量</label>
+          <input type="text" id="quantity" name="quantity" value="1" required>
+        </div>
+        <div>
+          <label for="discount_rate">値引率(%)</label>
+          <input type="text" id="discount_rate" name="discount_rate" value="0" required>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-sm">追加する</button>
+    </form>
+  </details>
+  {% else %}
+  <p class="subtitle" style="margin-top:14px;">追加できる商品がありません。<a href="/ui/products">商品(価格表)</a>から先に登録してください。</p>
+  {% endif %}
+
+  {% if not line_items %}
+  <details style="margin-top:16px;">
+    <summary style="cursor:pointer; font-size:13px; color:#2563eb;">金額を手動で入力する</summary>
+    <form method="post" action="/ui/engagements/{{ engagement.id }}/amount" style="margin-top:10px; max-width:480px;">
+      <div class="field-row">
+        <div>
+          <label for="amount">金額</label>
+          <input type="text" id="amount" name="amount" value="{{ engagement.amount if engagement.amount else '' }}" placeholder="例: 1000000">
+        </div>
+        <div>
+          <label for="currency">通貨</label>
+          <input type="text" id="currency" name="currency" value="{{ engagement.currency }}">
+        </div>
+      </div>
+      <label for="expected_close_date">受注予定日</label>
+      <input type="date" id="expected_close_date" name="expected_close_date"
+             value="{{ engagement.expected_close_date.isoformat() if engagement.expected_close_date else '' }}">
+      <button type="submit" class="btn btn-sm">更新する</button>
+    </form>
+  </details>
+  {% endif %}
+</div>
+
+<!-- 見積もり -->
+<div class="card">
+  <h2>見積もり({{ quotes | length }}件)</h2>
+  {% if quotes %}
+  {% for q in quotes %}
+  <div style="border-top:1px solid #eee; padding:12px 0;">
+    <div>
+      <strong class="mono">{{ q.quote_number }}</strong>
+      <span class="badge">{{ q.status }}</span>
+      <span class="mono" style="margin-left:8px;">{{ "{:,.0f}".format(q.total_amount) }} {{ q.currency }}</span>
+      {% if q.valid_until %}<span class="muted" style="font-size:12px;">(有効期限 {{ q.valid_until }})</span>{% endif %}
+    </div>
+    {% set qli = quote_line_items.get(q.id, []) %}
+    {% if qli %}
+    <table style="margin-top:8px;">
+      <thead><tr><th>商品</th><th>数量</th><th>単価</th><th>小計</th></tr></thead>
+      <tbody>
+        {% for li in qli %}
+        <tr>
+          <td>{{ li.product_name_snapshot }}</td>
+          <td class="mono">{{ li.quantity }}</td>
+          <td class="mono">{{ "{:,.0f}".format(li.unit_price) }}</td>
+          <td class="mono">{{ "{:,.0f}".format(li.line_total) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    <form method="post" action="/ui/engagements/{{ engagement.id }}/quotes/{{ q.id }}/status" class="inline" style="margin-top:8px;">
+      <select name="status">
+        {% for s in quote_status_values %}
+        <option value="{{ s.value }}" {% if s.value == q.status %}selected{% endif %}>{{ s.value }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="btn btn-sm btn-secondary">状態を更新</button>
+    </form>
+  </div>
+  {% endfor %}
+  {% else %}
+  <div class="empty-state">まだ見積もりがありません。</div>
+  {% endif %}
+
+  {% if line_items %}
+  <details style="margin-top:14px;">
+    <summary style="cursor:pointer; font-size:13px; color:#2563eb;">+ 見積もりを作成</summary>
+    <form method="post" action="/ui/engagements/{{ engagement.id }}/quotes" style="margin-top:10px; max-width:320px;">
+      <label for="valid_until">有効期限(任意)</label>
+      <input type="date" id="valid_until" name="valid_until">
+      <button type="submit" class="btn btn-sm">現在の商品構成から作成</button>
+    </form>
+  </details>
+  {% else %}
+  <p class="subtitle" style="margin-top:14px;">商品構成が無い案件から見積もりは作成できません。</p>
+  {% endif %}
+</div>
+
+<!-- 契約 -->
+<div class="card">
+  <h2>契約({{ contracts | length }}件)</h2>
+  {% if contracts %}
+  {% for c in contracts %}
+  <div style="border-top:1px solid #eee; padding:12px 0;">
+    <div>
+      <strong class="mono">{{ c.contract_number }}</strong>
+      <span class="badge">{{ c.status }}</span>
+      <span class="mono" style="margin-left:8px;">{{ "{:,.0f}".format(c.total_amount) }} {{ c.currency }}</span>
+      {% if c.start_date or c.end_date %}
+      <span class="muted" style="font-size:12px;">({{ c.start_date or "—" }} 〜 {{ c.end_date or "—" }})</span>
+      {% endif %}
+    </div>
+    {% set cli = contract_line_items.get(c.id, []) %}
+    {% if cli %}
+    <table style="margin-top:8px;">
+      <thead><tr><th>商品</th><th>数量</th><th>単価</th><th>小計</th></tr></thead>
+      <tbody>
+        {% for li in cli %}
+        <tr>
+          <td>{{ li.product_name_snapshot }}</td>
+          <td class="mono">{{ li.quantity }}</td>
+          <td class="mono">{{ "{:,.0f}".format(li.unit_price) }}</td>
+          <td class="mono">{{ "{:,.0f}".format(li.line_total) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    <form method="post" action="/ui/engagements/{{ engagement.id }}/contracts/{{ c.id }}/status" class="inline" style="margin-top:8px;">
+      <select name="status">
+        {% for s in contract_status_values %}
+        <option value="{{ s.value }}" {% if s.value == c.status %}selected{% endif %}>{{ s.value }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="btn btn-sm btn-secondary">状態を更新</button>
+    </form>
+  </div>
+  {% endfor %}
+  {% else %}
+  <div class="empty-state">まだ契約がありません。</div>
+  {% endif %}
+
+  {% if acceptable_quotes or line_items %}
+  <details style="margin-top:14px;">
+    <summary style="cursor:pointer; font-size:13px; color:#2563eb;">+ 契約を発行する</summary>
+    <form method="post" action="/ui/engagements/{{ engagement.id }}/contracts" style="margin-top:10px; max-width:420px;">
+      <label for="quote_id">元にする見積もり(任意 — 未選択の場合は現在の商品構成から直接発行)</label>
+      <select id="quote_id" name="quote_id">
+        <option value="">(見積もりを介さない)</option>
+        {% for q in acceptable_quotes %}
+        <option value="{{ q.id }}">{{ q.quote_number }}({{ "{:,.0f}".format(q.total_amount) }} {{ q.currency }})</option>
+        {% endfor %}
+      </select>
+      <div class="field-row">
+        <div>
+          <label for="start_date">契約開始日(任意)</label>
+          <input type="date" id="start_date" name="start_date">
+        </div>
+        <div>
+          <label for="end_date">契約終了日(任意)</label>
+          <input type="date" id="end_date" name="end_date">
+        </div>
+      </div>
+      <button type="submit" class="btn btn-sm">発行する</button>
+    </form>
+  </details>
+  {% else %}
+  <p class="subtitle" style="margin-top:14px;">商品構成(または承諾済みの見積もり)が無いため契約を発行できません。</p>
   {% endif %}
 </div>
 
@@ -150,18 +367,18 @@
       <input type="hidden" name="to_stage" value="{{ target_stage.value }}">
       {% if matching_waiver %}<input type="hidden" name="waiver_id" value="{{ matching_waiver.id }}">{% endif %}
       <button type="submit" class="btn" {% if gate and gate.blocks_transition and not matching_waiver %}disabled{% endif %}>
-        「{{ stage_labels.get(target_stage.value, target_stage.value) }}」へ進める{% if matching_waiver %}(Waiver 適用){% endif %}
+        「{{ stage_labels.get(target_stage.value, target_stage.value) }}」へ進める{% if matching_waiver %}(例外承認 適用){% endif %}
       </button>
     </form>
 
     {% if gate and gate.blocks_transition and policy and not matching_waiver %}
     <details style="margin-top:12px;">
-      <summary style="cursor:pointer; font-size:13px; color:#991b1b;">Waiver を発行してブロックを解除する</summary>
+      <summary style="cursor:pointer; font-size:13px; color:#991b1b;">例外承認を発行してブロックを解除する</summary>
       <form method="post" action="/ui/engagements/{{ engagement.id }}/waivers" style="margin-top:10px; max-width:420px;">
         <input type="hidden" name="policy_id" value="{{ policy.id }}">
         <label for="waiver_reason">理由(コンプライアンス証跡として記録されます)</label>
         <textarea id="waiver_reason" name="reason" required></textarea>
-        <button type="submit" class="btn btn-danger btn-sm">Waiver を発行</button>
+        <button type="submit" class="btn btn-danger btn-sm">例外承認を発行</button>
       </form>
     </details>
     {% endif %}
@@ -186,7 +403,7 @@
   {% endif %}
 
   {% if waivers %}
-  <h2 style="margin-top:20px;">発行済み Waiver</h2>
+  <h2 style="margin-top:20px;">発行済みの例外承認</h2>
   <table>
     <thead><tr><th>理由</th><th>承認日時</th></tr></thead>
     <tbody>

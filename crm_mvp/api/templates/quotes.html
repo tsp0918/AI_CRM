@@ -1,0 +1,58 @@
+{% extends "_base.html" %}
+
+{% block title %}見積・契約 | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<h1>見積・契約</h1>
+<p class="subtitle">全案件を横断した見積もり・契約の一覧です。作成・ステータス変更は各案件の詳細画面から行います。</p>
+
+<div class="card">
+  <h2>見積もり({{ quotes | length }}件)</h2>
+  {% if quotes %}
+  <table>
+    <thead><tr><th>番号</th><th>案件</th><th>状態</th><th>金額</th><th>作成日</th><th>有効期限</th></tr></thead>
+    <tbody>
+      {% for q in quotes %}
+      {% set engagement = engagements.get(q.engagement_id) %}
+      <tr>
+        <td class="mono">{{ q.quote_number }}</td>
+        <td>{% if engagement %}<a href="/ui/engagements/{{ engagement.id }}">{{ engagement.name }}</a>{% else %}—{% endif %}</td>
+        <td>{{ q.status }}</td>
+        <td class="mono">{{ "{:,.0f}".format(q.total_amount) }} {{ q.currency }}</td>
+        <td class="mono" style="font-size:11px;">{{ q.created_at.strftime("%Y-%m-%d") }}</td>
+        <td>{{ q.valid_until or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">まだ見積もりがありません。</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>契約({{ contracts | length }}件)</h2>
+  {% if contracts %}
+  <table>
+    <thead><tr><th>番号</th><th>案件</th><th>状態</th><th>金額</th><th>作成日</th><th>契約期間</th></tr></thead>
+    <tbody>
+      {% for c in contracts %}
+      {% set engagement = engagements.get(c.engagement_id) %}
+      <tr>
+        <td class="mono">{{ c.contract_number }}</td>
+        <td>{% if engagement %}<a href="/ui/engagements/{{ engagement.id }}">{{ engagement.name }}</a>{% else %}—{% endif %}</td>
+        <td>{{ c.status }}</td>
+        <td class="mono">{{ "{:,.0f}".format(c.total_amount) }} {{ c.currency }}</td>
+        <td class="mono" style="font-size:11px;">{{ c.created_at.strftime("%Y-%m-%d") }}</td>
+        <td>
+          {% if c.start_date or c.end_date %}{{ c.start_date or "—" }} 〜 {{ c.end_date or "—" }}{% else %}—{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">まだ契約がありません。</div>
+  {% endif %}
+</div>
+{% endblock %}

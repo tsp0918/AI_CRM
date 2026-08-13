@@ -222,3 +222,19 @@ class SequenceDraftStatus(StrEnum):
     DRAFT = "draft"
     REVIEWED = "reviewed"      # IS担当者が確認し、手動で対応した
     DISMISSED = "dismissed"    # このステップは送らないと判断した
+
+
+class QuoteStatus(StrEnum):
+    DRAFT = "draft"
+    SENT = "sent"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+
+
+class ContractStatus(StrEnum):
+    DRAFT = "draft"
+    SENT = "sent"
+    SIGNED = "signed"
+    ACTIVE = "active"
+    TERMINATED = "terminated"

@@ -1,0 +1,66 @@
+{% extends "_base.html" %}
+
+{% block title %}商品(価格表) | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<h1>商品(価格表)</h1>
+<p class="subtitle">
+  Product Priceリスト。将来ERPと連携する前提のダミーデータです。案件の商品構成はここから選択します。
+</p>
+
+{% if products %}
+<div class="card" style="padding:0;">
+  <table>
+    <thead><tr><th>商品名</th><th>SKU</th><th>定価</th><th>状態</th><th></th></tr></thead>
+    <tbody>
+      {% for p in products %}
+      <tr>
+        <td>{{ p.name }}{% if p.description %}<div class="muted" style="font-size:12px;">{{ p.description }}</div>{% endif %}</td>
+        <td class="mono">{{ p.sku or "—" }}</td>
+        <td class="mono">{{ "{:,.0f}".format(p.list_price) }} {{ p.currency }}</td>
+        <td>{% if p.is_active %}<span class="badge badge-gate-ok">公開中</span>{% else %}<span class="muted">非公開</span>{% endif %}</td>
+        <td>
+          {% if p.is_active %}
+          <form method="post" action="/ui/products/{{ p.id }}/deactivate" class="inline">
+            <button type="submit" class="btn btn-sm btn-secondary">非公開にする</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card"><div class="empty-state">まだ商品がありません。下のフォームから登録してください。</div></div>
+{% endif %}
+
+<div class="card">
+  <h2>+ 新規商品</h2>
+  <form method="post" action="/ui/products/new">
+    <div class="field-row">
+      <div>
+        <label for="name">商品名</label>
+        <input type="text" id="name" name="name" required placeholder="例: 検査装置 標準モデル">
+      </div>
+      <div>
+        <label for="sku">SKU(任意)</label>
+        <input type="text" id="sku" name="sku" placeholder="例: INSP-100">
+      </div>
+    </div>
+    <div class="field-row">
+      <div>
+        <label for="list_price">定価</label>
+        <input type="text" id="list_price" name="list_price" required placeholder="例: 1000000">
+      </div>
+      <div>
+        <label for="currency">通貨</label>
+        <input type="text" id="currency" name="currency" value="JPY">
+      </div>
+    </div>
+    <label for="description">説明(任意)</label>
+    <textarea id="description" name="description"></textarea>
+    <button type="submit" class="btn">登録する</button>
+  </form>
+</div>
+{% endblock %}
