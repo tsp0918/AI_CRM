@@ -70,6 +70,15 @@ class Engagement(Base, UUIDPk, Timestamped, TenantScoped):
         ForeignKey("sales_group.id", ondelete="SET NULL"), index=True
     )
 
+    # 実名簿(User、user_matrix_CRM.csv)への構造化リンク(2026-08-13)。
+    # 上の owner(自由記述)は当初「参照先が無い死んだ列」だった旧owner_idを
+    # 置き換える形で導入した経緯があるが、今回Userという実体ができたため
+    # 構造化リンクを復活させる。owner はUI互換のため残し、両方を並行運用する
+    # (owner_user_id があればそちらを正とする)。
+    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("app_user.id", ondelete="SET NULL"), index=True
+    )
+
     slots: Mapped[list["QualificationSlot"]] = relationship(
         back_populates="engagement", cascade="all, delete-orphan"
     )

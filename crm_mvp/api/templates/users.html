@@ -1,0 +1,37 @@
+{% extends "_base.html" %}
+
+{% block title %}ユーザー名簿 | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<h1>ユーザー名簿</h1>
+<p class="subtitle">
+  社内組織図(user_matrix_CRM.csv)を取り込んだ読み取り専用の名簿です。ログイン認証は持ちません。
+  Authority(承認権限)は今回はデータとして保持するのみで、承認ゲートにはまだ使っていません。
+</p>
+
+{% if users %}
+<div class="card" style="padding:0;">
+  <table>
+    <thead><tr><th>氏名</th><th>Function</th><th>Role</th><th>Authority</th><th>所属セールスグループ</th><th>メール</th></tr></thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td>{{ u.name }}</td>
+        <td>{{ u.function }}</td>
+        <td>{{ u.role }}</td>
+        <td>
+          {% if u.authority != "none" %}
+          <span class="badge badge-gate-warn">{{ authority_labels.get(u.authority, u.authority) }}</span>
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+        <td>{% set sg = sales_groups.get(u.sales_group_id) %}{{ sg.name if sg else "—" }}</td>
+        <td class="mono" style="font-size:12px;">{{ u.email }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card"><div class="empty-state">まだユーザーが登録されていません。</div></div>
+{% endif %}
+{% endblock %}

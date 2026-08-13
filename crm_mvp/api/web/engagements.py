@@ -18,7 +18,7 @@ from ...enums import (
 from ...models import (
     Account, ActionItem, Campaign, Contract, Engagement, EngagementLineItem,
     ExtractionProposal, GraphNode, IngestionSource, Lead, Product,
-    QualificationSlot, Quote, SalesGroup, Waiver,
+    QualificationSlot, Quote, SalesGroup, User, Waiver,
 )
 from ...services.action_items import (
     assign_action_item, complete_action_item, dismiss_action_item,
@@ -213,6 +213,9 @@ def engagement_detail(
     current_sales_group = (
         session.get(SalesGroup, engagement.sales_group_id) if engagement.sales_group_id else None
     )
+    current_owner_user = (
+        session.get(User, engagement.owner_user_id) if engagement.owner_user_id else None
+    )
 
     context = base_context(
         session, ui_session, active_nav="dashboard", flash=flash, flash_type=flash_type,
@@ -242,6 +245,7 @@ def engagement_detail(
         "child_engagements": child_engagements,
         "relationship_type_values": list(EngagementRelationshipType),
         "sales_groups": sales_groups, "current_sales_group": current_sales_group,
+        "current_owner_user": current_owner_user,
     })
     return templates.TemplateResponse(request, "engagement_detail.html", context)
 

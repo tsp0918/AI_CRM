@@ -264,6 +264,20 @@ class FeftaJudgment(StrEnum):
     NOT_APPLICABLE = "NOT_APPLICABLE"
 
 
+class AuthorityLevel(StrEnum):
+    """承認権限レベル(2026-08-13 user_matrix_CRM.csv の Authority 列)。
+
+    値なし(NONE)が大多数で、承認権限を持つ人だけに Approver 系の値が
+    付く。今回はUserに保持するだけ — 値引率承認フロー等の実際のゲート
+    判定にはまだ使わない(将来の拡張として温存)。
+    """
+
+    NONE = "none"
+    APPROVER = "approver"
+    APPROVER_HIGH = "approver_high"
+    APPROVER_SUPER = "approver_super"
+
+
 class EngagementRelationshipType(StrEnum):
     """親商談(クロージング済みの案件)との関係。Engagement.parent_engagement_id
     が設定されている場合のみ意味を持つ(2026-08-13 ユーザー要望: 契約済み案件の

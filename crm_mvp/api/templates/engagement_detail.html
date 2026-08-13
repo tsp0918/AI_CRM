@@ -20,7 +20,9 @@
 </p>
 {% endif %}
 <p class="subtitle">
-  セールスグループ: {{ current_sales_group.name if current_sales_group else "未設定" }}
+  担当者: {{ current_owner_user.name if current_owner_user else (engagement.owner or "未設定") }}
+  {% if current_owner_user %}({{ current_owner_user.role }}){% endif %}
+  / セールスグループ: {{ current_sales_group.name if current_sales_group else "未設定" }}
   <details style="display:inline; margin-left:6px;">
     <summary style="cursor:pointer; display:inline; color:#2563eb; font-size:12px;">変更</summary>
     <form method="post" action="/ui/engagements/{{ engagement.id }}/sales-group" class="inline" style="margin-top:6px;">

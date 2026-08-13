@@ -1,0 +1,22 @@
+﻿Function,Role,Authority,Name,email
+Board,Managing Director,Approver-Super,Seiichi Miura,seiichi.miura@ts-materials.com
+Marketing,Director,Approver,Yuki Shiraishi,yuki.shiraishi@ts-materials.com
+Marketing,Field Marketing,,Ryota Okada,ryota.okada@ts-materials.com
+Marketing,Field Marketing,,Miwa Hayashi,miwa.hayashi@ts-materials.com
+Inside Sales,Director,Approver,Ryo Soma,ryo.soma@ts-materials.com
+Inside Sales,SDR,,Haruka Chiba,haruka.chiba@ts-materials.com
+Inside Sales,SDR,,Takuya Onishi,takuya.onishi@ts-materials.com
+Inside Sales,BDR,,Aya Miyashita,aya.miyashita@ts-materials.com
+Sales,Director,Approver-High,Masayuki Kurokawa,masayuki.kurokawa@ts-materials.com
+Sales,Sales Manager,Approver,Naoki Fujiwara,naoki.fujiwara@ts-materials.com
+Sales,BDM,,Ryo Ichinose,ryo.ichinose@ts-materials.com
+Sales,BDM,,Mai Azuma,mai.azuma@ts-materials.com
+Sales,KAM,,Takashi Kamiya,takashi.kamiya@ts-materials.com
+Sales,AM,,Keiko Sawada,keiko.sawada@ts-materials.com
+Sales,AM,,Yusuke Horiuchi,yusuke.horiuchi@ts-materials.com
+Sales,Customer Success Manager,Approver,Chihiro Kogure,chihiro.kogure@ts-materials.com
+Sales,CS,,Kei Amano,kei.amano@ts-materials.com
+Sales,CS,,Nana Shibata,nana.shibata@ts-materials.com
+Sales,CS,,Sho Utsumi,sho.utsumi@ts-materials.com
+Sales,RecOps,,Manabu Hyodo,manabu.hyodo@ts-materials.com
+Sales,RevOps,,Kana Kajiwara,kana.kajiwara@ts-materials.com

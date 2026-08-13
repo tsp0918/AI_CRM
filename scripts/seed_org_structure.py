@@ -1,4 +1,4 @@
-"""売上レポート・ABM機能のデモ用組織構造投入。
+"""取引先の法人階層(ロールアップ)とABMデモ用リードの投入。
 
   python scripts/seed_org_structure.py --tenant-id <uuid>
 
@@ -6,15 +6,17 @@
 実行しておくこと(取引先・商談データが必要)。
 
 投入内容:
-  - セールスグループ(階層): 海外営業本部 > 東アジア営業課 / 北米・欧州営業課
-    既存の全商談に、取引先の国コードに応じて割り当てる
   - "NSC Group" という親取引先を新設し、既存の NSC Taiwan/Korea/Singapore/
     USA の4アカウントをその下にロールアップする(法人グループ単位の
     売上ロールアップ・ディレクトリ構造のデモ)
   - ABMデモ用に、まだAccountを持たない新規リードを1件、NSC Groupに
     手動で紐付ける(「既知の戦略ファミリーからの新規引き合い」を再現)
 
-このスクリプトは既存データを削除せず、組織構造の割り当てのみを行う。
+セールスグループの投入は scripts/seed_users_and_sales_groups.py に移管した
+(2026-08-14: user_matrix_CRM.csv による実組織データへの置き換えに伴い、
+このスクリプトが作っていた地域別の仮のセールスグループは廃止)。
+
+このスクリプトは既存データを削除せず、取引先階層の割り当てのみを行う。
 """
 
 from __future__ import annotations
@@ -26,20 +28,15 @@ import uuid
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
-from crm_mvp.models import Account, Engagement, Lead
+from crm_mvp.models import Account, Lead
 from crm_mvp.services.account_hierarchy import (
     create_grouping_account, set_parent_account,
 )
-from crm_mvp.services.sales_groups import create_sales_group
 
 DEFAULT_DATABASE_URL = "postgresql+psycopg://crm_app@localhost:5432/crm_mvp"
 DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-0000000000aa")
 
 TENANT_ID = DEFAULT_TENANT_ID
-
-# 取引先名 -> 国コード(erp_business_partner.country と同じ値をここでも
-# 明示しておく。Accountに country が入っていない場合のフォールバック)。
-EAST_ASIA_COUNTRIES = {"TW", "KR", "SG", "CN", "JP"}
 
 NSC_ACCOUNT_NAMES = [
     "NSC Taiwan Materials Co., Ltd.",
@@ -50,15 +47,8 @@ NSC_ACCOUNT_NAMES = [
 
 
 def wipe_org_structure(session: Session) -> None:
-    """組織構造の投入だけをやり直せるように、セールスグループと
-    NSC Group 親アカウントのみ削除する(商談・取引先本体は消さない)。"""
-    session.execute(
-        text(
-            "UPDATE engagement SET sales_group_id = NULL "
-            "WHERE tenant_id = :tid"
-        ),
-        {"tid": str(TENANT_ID)},
-    )
+    """組織構造の投入だけをやり直せるように、NSC Group 親アカウント
+    まわりのみ削除する(商談・取引先本体は消さない)。"""
     session.execute(
         text(
             "UPDATE account SET parent_account_id = NULL "
@@ -74,41 +64,6 @@ def wipe_org_structure(session: Session) -> None:
         text("DELETE FROM account WHERE tenant_id = :tid AND name = 'NSC Group'"),
         {"tid": str(TENANT_ID)},
     )
-    session.execute(text("DELETE FROM sales_group WHERE tenant_id = :tid"), {"tid": str(TENANT_ID)})
-
-
-def seed_sales_groups(session: Session) -> dict[str, uuid.UUID]:
-    hq = create_sales_group(session, TENANT_ID, name="海外営業本部")
-    east_asia = create_sales_group(
-        session, TENANT_ID, name="東アジア営業課", parent_group_id=hq.id,
-    )
-    americas_europe = create_sales_group(
-        session, TENANT_ID, name="北米・欧州営業課", parent_group_id=hq.id,
-    )
-    session.flush()
-    return {"east_asia": east_asia.id, "americas_europe": americas_europe.id}
-
-
-def assign_sales_groups(session: Session, group_ids: dict[str, uuid.UUID]) -> int:
-    accounts = session.execute(
-        select(Account).where(Account.tenant_id == TENANT_ID)
-    ).scalars().all()
-    account_country = {a.id: a.country for a in accounts}
-
-    engagements = session.execute(
-        select(Engagement).where(Engagement.tenant_id == TENANT_ID)
-    ).scalars().all()
-
-    count = 0
-    for e in engagements:
-        country = account_country.get(e.account_id)
-        if country in EAST_ASIA_COUNTRIES:
-            e.sales_group_id = group_ids["east_asia"]
-        else:
-            e.sales_group_id = group_ids["americas_europe"]
-        count += 1
-    session.flush()
-    return count
 
 
 def rollup_nsc_group(session: Session) -> None:
@@ -167,19 +122,13 @@ def main() -> None:
         wipe_org_structure(session)
         session.commit()
 
-        group_ids = seed_sales_groups(session)
-        session.commit()
-
-        n = assign_sales_groups(session, group_ids)
-        session.commit()
-
         rollup_nsc_group(session)
         session.commit()
 
         seed_abm_lead(session)
         session.commit()
 
-    print(f"Assigned sales groups to {n} engagements and rolled up NSC accounts for tenant {TENANT_ID}.")
+    print(f"Rolled up NSC accounts and seeded ABM demo lead for tenant {TENANT_ID}.")
 
 
 if __name__ == "__main__":
