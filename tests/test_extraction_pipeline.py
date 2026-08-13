@@ -35,6 +35,27 @@ class TestExtractedClaimEvidenceRequired:
         with pytest.raises(ValueError):
             make_claim("engagement", "expected_close_date", evidence_quote="   ")
 
+    def test_too_short_evidence_quote_is_rejected(self):
+        # 入力品質ゲート: 空でなくても実質的な根拠になっていない短すぎる
+        # 引用は破棄する(新人担当者の薄い記録対策)。
+        with pytest.raises(ValueError):
+            make_claim("engagement", "expected_close_date", evidence_quote="はい")
+
+    def test_missing_rationale_is_rejected(self):
+        with pytest.raises(ValueError):
+            make_claim("engagement", "expected_close_date", rationale="")
+
+    def test_too_short_rationale_is_rejected(self):
+        with pytest.raises(ValueError):
+            make_claim("engagement", "expected_close_date", rationale="うん")
+
+    def test_minimum_length_evidence_and_rationale_are_accepted(self):
+        claim = make_claim(
+            "engagement", "expected_close_date",
+            rationale="発言から抽出", evidence_quote="来月には導入したい",
+        )
+        assert claim.rationale == "発言から抽出"
+
 
 class TestNeverAiFields:
     def test_never_ai_fields_are_dropped_from_proposals(self):

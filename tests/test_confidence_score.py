@@ -222,6 +222,46 @@ class TestComposedScoreAndPoints:
         assert low.band == "low"
 
 
+class TestChampionRoleCriterionConsistency:
+    def test_flags_when_champion_role_exists_but_criterion_missing(self):
+        roles = {
+            uuid.uuid4(): {"access_level": AccessLevel.ENGAGED,
+                           "roles": [BuyingCenterRole.CHAMPION.value]},
+        }
+        score = cs.compute_confidence_score({}, {}, [], roles, now=NOW)
+        assert score.champion_gap is True
+        assert Criterion.CHAMPION in score.missing_criteria
+
+    def test_no_gap_when_champion_role_absent(self):
+        roles = {
+            uuid.uuid4(): {"access_level": AccessLevel.ENGAGED,
+                           "roles": [BuyingCenterRole.FINANCE.value]},
+        }
+        score = cs.compute_confidence_score({}, {}, [], roles, now=NOW)
+        assert score.champion_gap is False
+
+    def test_no_gap_when_champion_criterion_is_filled(self):
+        roles = {
+            uuid.uuid4(): {"access_level": AccessLevel.ENGAGED,
+                           "roles": [BuyingCenterRole.CHAMPION.value]},
+        }
+        slots = {
+            Criterion.CHAMPION: make_slot(Criterion.CHAMPION, Confidence.ASSERTED),
+        }
+        score = cs.compute_confidence_score(slots, {}, [], roles, now=NOW)
+        assert score.champion_gap is False
+
+    def test_score_reasons_gives_specific_message_and_omits_generic_one(self):
+        score = cs.ConfidenceScore(
+            total=10, evidence_depth=0.0, governance_reach=0.0, freshness=0.0,
+            single_threaded=False, decider_reachable=False, decider_engaged=False,
+            missing_criteria=[Criterion.CHAMPION], champion_gap=True,
+        )
+        reasons = cs.score_reasons(score, {"champion": "チャンピオン"})
+        assert any("championとしての実質的なコミットメント" in r for r in reasons)
+        assert not any(r.startswith("未入力の評価軸") for r in reasons)
+
+
 class TestScoreReasons:
     def test_lists_missing_and_decaying_and_governance_gaps(self):
         score = cs.ConfidenceScore(

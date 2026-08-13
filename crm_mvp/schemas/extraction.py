@@ -39,8 +39,18 @@ class ExtractionRequest(BaseModel):
     targets: list[ExtractionTarget]
 
 
+MIN_EVIDENCE_QUOTE_LENGTH = 4
+MIN_RATIONALE_LENGTH = 4
+
+
 class ExtractedClaim(BaseModel):
-    """LLM が返す1件。evidence_quote が無いものは受け付けない。"""
+    """LLM が返す1件。evidence_quote / rationale は最低限の実質的な内容を要求する。
+
+    入力品質ゲート: 低品質な抽出がそのまま提案として承認可能になると、
+    下流の指標(ゲート判定・確度スコア)の信頼性を静かに毀損する。
+    閾値は「明らかに空虚な入力を弾く」程度の低いバーに留め、正当な短い
+    根拠(固有名詞の引用等)まで弾かないようにする。
+    """
 
     target_type: str
     field_path: str
@@ -53,8 +63,20 @@ class ExtractedClaim(BaseModel):
     @field_validator("evidence_quote")
     @classmethod
     def _must_have_evidence(cls, v: str) -> str:
-        if not v or not v.strip():
-            raise ValueError("evidence_quote は必須。根拠なき提案は破棄する。")
+        if not v or len(v.strip()) < MIN_EVIDENCE_QUOTE_LENGTH:
+            raise ValueError(
+                f"evidence_quote は{MIN_EVIDENCE_QUOTE_LENGTH}文字以上必須。"
+                "根拠なき/薄すぎる提案は破棄する。"
+            )
+        return v
+
+    @field_validator("rationale")
+    @classmethod
+    def _must_have_rationale(cls, v: str) -> str:
+        if not v or len(v.strip()) < MIN_RATIONALE_LENGTH:
+            raise ValueError(
+                f"rationale は{MIN_RATIONALE_LENGTH}文字以上必須。理由のない提案は破棄する。"
+            )
         return v
 
 

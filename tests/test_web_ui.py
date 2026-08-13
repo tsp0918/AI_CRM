@@ -334,7 +334,7 @@ class TestProposalInbox:
                         target_type="qualification_slot",
                         field_path="criterion:budget",
                         value={"amount": 1}, model_score=0.99,
-                        rationale="t", evidence_quote="発言",
+                        rationale="発言から抽出", evidence_quote="発言の引用文",
                     )],
                     extractor_version="test-v1",
                 )

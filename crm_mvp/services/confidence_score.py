@@ -47,6 +47,7 @@ class ConfidenceScore:
     decider_engaged: bool
     missing_criteria: list[Criterion] = field(default_factory=list)
     decaying_soon: list[tuple[Criterion, datetime]] = field(default_factory=list)
+    champion_gap: bool = False
 
     @property
     def multiplier(self) -> float:
@@ -141,6 +142,22 @@ def _freshness(
     return fresh_count / len(filled), decaying_soon
 
 
+def _champion_role_without_criterion(
+    roles: dict, missing_criteria: list[Criterion],
+) -> bool:
+    """相関図に championロールの人物はいるが、championクライテリア(実質的な
+    コミットメントの証跡)には何も入っていない、という不整合を検出する。
+    「人物を登録した」だけで満足してしまう心理的な落とし穴(2年間
+    シミュレーション報告書 課題5)を機械的に検出する。
+    """
+    if Criterion.CHAMPION not in missing_criteria:
+        return False
+    return any(
+        BuyingCenterRole.CHAMPION.value in (r.get("roles") or [])
+        for r in roles.values()
+    )
+
+
 def compute_confidence_score(
     slots: dict, nodes: dict, edges: list, roles: dict,
     now: datetime | None = None,
@@ -169,17 +186,27 @@ def compute_confidence_score(
         decider_engaged=decider_engaged,
         missing_criteria=missing_criteria,
         decaying_soon=decaying_soon,
+        champion_gap=_champion_role_without_criterion(roles, missing_criteria),
     )
 
 
 def score_reasons(score: ConfidenceScore, criterion_labels: dict) -> list[str]:
     """内訳画面向けの説明文(gate_engine.MissingItem.reason と同じ思想)。"""
     reasons: list[str] = []
-    if score.missing_criteria:
+    other_missing = [
+        c for c in score.missing_criteria
+        if not (score.champion_gap and c == Criterion.CHAMPION)
+    ]
+    if other_missing:
         names = "、".join(
-            criterion_labels.get(c.value, c.value) for c in score.missing_criteria
+            criterion_labels.get(c.value, c.value) for c in other_missing
         )
         reasons.append(f"未入力の評価軸: {names}")
+    if score.champion_gap:
+        reasons.append(
+            "相関図にchampionロールの人物は登録されているが、"
+            "championとしての実質的なコミットメント(評価軸)はまだ未確認"
+        )
     if score.decaying_soon:
         names = "、".join(
             f"{criterion_labels.get(c.value, c.value)}({d.strftime('%Y-%m-%d')})"
