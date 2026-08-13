@@ -12,6 +12,33 @@
   {% if campaign %} / <a href="/ui/campaigns">{{ campaign.name }}</a>{% endif %}
 </p>
 
+<!-- 取引先紐付け(ABM: 商談化前から組織構造でアタック先を把握する) -->
+<div class="card">
+  <h2>紐付け先の取引先</h2>
+  {% if matched_account %}
+  <p class="subtitle" style="margin-bottom:12px;">
+    <a href="/ui/accounts/{{ matched_account.id }}">{{ matched_account.name }}</a> に紐付け済みです。
+    案件化する際はこの取引先がそのまま使われます。
+  </p>
+  {% else %}
+  <p class="subtitle" style="margin-bottom:12px;">
+    まだ取引先に紐付いていません。既存の取引先(法人グループ)が分かっている場合は紐付けておくと、
+    Account-based Marketingでのアタック先選定に使えます。
+  </p>
+  {% endif %}
+  <form method="post" action="/ui/leads/{{ lead.id }}/account" style="max-width:420px;">
+    <select name="account_id">
+      <option value="">(紐付けない)</option>
+      {% for a in available_accounts %}
+      <option value="{{ a.id }}" {% if matched_account and a.id == matched_account.id %}selected{% endif %}>
+        {% if a.parent_account_id %}└ {% endif %}{{ a.name }}
+      </option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-sm">紐付けを更新</button>
+  </form>
+</div>
+
 <!-- スコア -->
 <div class="card">
   <h2>スコア <span class="quadrant-badge quadrant-{{ score.quadrant }}">{{ score.quadrant }}</span></h2>

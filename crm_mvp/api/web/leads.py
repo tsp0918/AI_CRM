@@ -20,6 +20,7 @@ from ...enums import (
 from ...models import (
     Account, Campaign, Lead, Sequence, SequenceDraft, SequenceEnrollment, SequenceStep,
 )
+from ...services.account_hierarchy import list_accounts_tree_ordered
 from ...services.lead_lifecycle import (
     convert_lead, disqualify_lead, list_touches, maybe_promote_to_mql,
     promote_lead, record_touch,
@@ -237,6 +238,10 @@ def lead_detail(
     next_status = NEXT_STATUS.get(lead.status)
 
     campaign = session.get(Campaign, lead.source_campaign_id) if lead.source_campaign_id else None
+    matched_account = (
+        session.get(Account, lead.matched_account_id) if lead.matched_account_id else None
+    )
+    available_accounts = list_accounts_tree_ordered(session, ui_session.tenant_id)
 
     available_sequences = session.execute(
         select(Sequence).where(
@@ -283,6 +288,7 @@ def lead_detail(
         "drafts": drafts, "step_channel_labels": STEP_CHANNEL_LABELS,
         "active_enrollment_status": SequenceEnrollmentStatus.ACTIVE,
         "pipelines": pipelines, "campaign": campaign,
+        "matched_account": matched_account, "available_accounts": available_accounts,
     })
     return templates.TemplateResponse(request, "lead_detail.html", context)
 
@@ -343,6 +349,29 @@ def convert_lead_ui(
     return redirect_with_flash(
         f"/ui/engagements/{engagement.id}", f"{lead.company_name} を案件化しました",
     )
+
+
+@router.post("/ui/leads/{lead_id}/account")
+def set_matched_account_ui(
+    lead_id: uuid.UUID,
+    account_id: str = Form(""),
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> RedirectResponse:
+    """商談化前のリードを既存の取引先(法人グループ含む)に手動で紐付ける。
+    Account-based Marketingでの組織構造からのアタック先選定に使う
+    (2026-08-13 ユーザー要望)。案件化時、既にここで紐付いていればその
+    Accountがそのまま使われる(convert_lead参照)。"""
+    lead = _get_lead_or_404(session, ui_session, lead_id)
+    if account_id.strip():
+        account = session.get(Account, uuid.UUID(account_id))
+        if account is None or account.tenant_id != ui_session.tenant_id:
+            return redirect_with_flash(f"/ui/leads/{lead_id}", "取引先が見つかりません", "error")
+        lead.matched_account_id = account.id
+    else:
+        lead.matched_account_id = None
+    session.commit()
+    return redirect_with_flash(f"/ui/leads/{lead_id}", "紐付け先の取引先を更新しました")
 
 
 @router.post("/ui/leads/{lead_id}/disqualify")

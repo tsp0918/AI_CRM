@@ -64,6 +64,12 @@ class Engagement(Base, UUIDPk, Timestamped, TenantScoped):
     )
     relationship_type: Mapped[str | None] = mapped_column(String(20))
 
+    # 売上レポート集計用の営業組織タグ(2026-08-13)。owner(自由記述の担当者名)
+    # とは独立 — 「誰が」ではなく「どの営業組織の実績か」を表す。
+    sales_group_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("sales_group.id", ondelete="SET NULL"), index=True
+    )
+
     slots: Mapped[list["QualificationSlot"]] = relationship(
         back_populates="engagement", cascade="all, delete-orphan"
     )

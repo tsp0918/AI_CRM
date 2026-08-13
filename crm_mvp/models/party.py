@@ -30,6 +30,13 @@ class Account(Base, UUIDPk, Timestamped, TenantScoped):
     external_system: Mapped[str | None] = mapped_column(String(32))
     external_id: Mapped[str | None] = mapped_column(String(128))
 
+    # 法人グループのロールアップ(親会社/子会社)。Engagement.parent_engagement_id
+    # と同じ自己参照パターン。子会社Accountが削除されても履歴は残したいため
+    # SET NULL(2026-08-13 ユーザー要望: 取引先を頂点にした売上ロールアップ)。
+    parent_account_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("account.id", ondelete="SET NULL"), index=True
+    )
+
     contacts: Mapped[list[Contact]] = relationship(back_populates="account")
     compliance: Mapped[list[ComplianceStatus]] = relationship(
         back_populates="account"

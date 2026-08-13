@@ -1,0 +1,103 @@
+{% extends "_base.html" %}
+
+{% block title %}売上レポート | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<h1>売上レポート</h1>
+<p class="subtitle">
+  受注(closed_won)した商談を対象に、契約が発行されていれば契約金額(将来はERPと同期した実売上額)、
+  無ければ案件金額を実売上として集計しています。
+</p>
+
+<div class="card">
+  <h2>累計実売上</h2>
+  <div style="font-size:32px; font-weight:800; font-family:ui-monospace,monospace;">
+    {{ "{:,.0f}".format(total_revenue) }} JPY
+  </div>
+  <p class="subtitle" style="margin-top:4px;">受注商談 {{ deal_count }}件</p>
+</div>
+
+<div class="field-row">
+  <div class="card">
+    <h2>商品グループ別</h2>
+    {% if by_product_group %}
+    <table>
+      <thead><tr><th>商品グループ</th><th>金額</th><th>明細数</th></tr></thead>
+      <tbody>
+        {% for row in by_product_group %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td class="mono">{{ "{:,.0f}".format(row.amount) }}</td>
+          <td class="mono">{{ row.count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">データがありません。</div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>取引先(法人グループ)別</h2>
+    {% if by_account %}
+    <table>
+      <thead><tr><th>取引先</th><th>金額</th><th>商談数</th></tr></thead>
+      <tbody>
+        {% for row in by_account %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td class="mono">{{ "{:,.0f}".format(row.amount) }}</td>
+          <td class="mono">{{ row.count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">データがありません。</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="field-row">
+  <div class="card">
+    <h2>セールスグループ別</h2>
+    {% if by_sales_group %}
+    <table>
+      <thead><tr><th>セールスグループ</th><th>金額</th><th>商談数</th></tr></thead>
+      <tbody>
+        {% for row in by_sales_group %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td class="mono">{{ "{:,.0f}".format(row.amount) }}</td>
+          <td class="mono">{{ row.count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">データがありません。</div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>関係性別(新規/更新/Upsell/Cross-sell)</h2>
+    {% if by_relationship %}
+    <table>
+      <thead><tr><th>関係性</th><th>金額</th><th>商談数</th></tr></thead>
+      <tbody>
+        {% for row in by_relationship %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td class="mono">{{ "{:,.0f}".format(row.amount) }}</td>
+          <td class="mono">{{ row.count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">データがありません。</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

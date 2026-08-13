@@ -9,6 +9,7 @@ from .sequence import Sequence, SequenceDraft, SequenceEnrollment, SequenceStep
 from .erp_material import ErpMaterial
 from .erp_business_partner import ErpBusinessPartner
 from .product_group import ProductGroup
+from .sales_group import SalesGroup
 from .pricing import EngagementLineItem, Product
 from .quoting import Contract, ContractLineItem, Quote, QuoteLineItem
 
@@ -21,7 +22,7 @@ __all__ = [
     "IngestionSource", "ExtractionProposal", "FieldAutonomyPolicy",
     "Campaign", "Lead", "Touch",
     "Sequence", "SequenceStep", "SequenceEnrollment", "SequenceDraft",
-    "ErpMaterial", "ErpBusinessPartner", "ProductGroup",
+    "ErpMaterial", "ErpBusinessPartner", "ProductGroup", "SalesGroup",
     "Product", "EngagementLineItem",
     "Quote", "QuoteLineItem", "Contract", "ContractLineItem",
 ]

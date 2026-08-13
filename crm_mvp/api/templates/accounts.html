@@ -1,0 +1,65 @@
+{% extends "_base.html" %}
+
+{% block title %}取引先 | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<h1>取引先</h1>
+<p class="subtitle">
+  取引先を頂点にしたディレクトリ構造です。法人グループ(親会社/子会社)をまとめると、
+  配下の商談・リードを横断して見渡せます。
+</p>
+
+{% if accounts %}
+<div class="card" style="padding:0;">
+  <table>
+    <thead><tr><th>取引先名</th><th>国</th><th>親取引先の変更</th></tr></thead>
+    <tbody>
+      {% for a in accounts %}
+      <tr>
+        <td>
+          {% if a.parent_account_id %}└ {% endif %}
+          <a href="/ui/accounts/{{ a.id }}">{{ a.name }}</a>
+          {% if a.external_system %}<span class="muted" style="font-size:11px;"> ({{ a.external_system }}:{{ a.external_id }})</span>{% endif %}
+        </td>
+        <td class="mono">{{ a.country or "—" }}</td>
+        <td>
+          <form method="post" action="/ui/accounts/{{ a.id }}/parent" class="inline">
+            <select name="parent_account_id" style="width:auto; display:inline-block;">
+              <option value="">(トップレベル)</option>
+              {% for p in accounts %}
+              {% if p.id != a.id %}
+              <option value="{{ p.id }}" {% if a.parent_account_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+              {% endif %}
+              {% endfor %}
+            </select>
+            <button type="submit" class="btn btn-sm btn-secondary">設定</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card"><div class="empty-state">まだ取引先がありません。</div></div>
+{% endif %}
+
+<div class="card">
+  <h2>+ 取引先グループを作成</h2>
+  <p class="subtitle" style="margin-bottom:12px;">
+    ERPに存在しない、法人グループをまとめるためだけのCRM独自の取引先を作れます(例: "NSC Group")。
+  </p>
+  <form method="post" action="/ui/accounts/new">
+    <label for="name">取引先名</label>
+    <input type="text" id="name" name="name" required placeholder="例: NSC Group">
+    <label for="parent_account_id">親取引先(任意)</label>
+    <select id="parent_account_id" name="parent_account_id">
+      <option value="">(トップレベル)</option>
+      {% for a in accounts %}
+      <option value="{{ a.id }}">{{ a.name }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-sm">作成する</button>
+  </form>
+</div>
+{% endblock %}

@@ -9,9 +9,9 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from . import (
-    campaigns, dashboard, engagements, erp_business_partners, erp_materials,
-    forecast_risk, graph, leads, products, proposals, quotes, renewals,
-    sequences, sources, workspace,
+    accounts, campaigns, dashboard, engagements, erp_business_partners,
+    erp_materials, forecast_risk, graph, leads, products, proposals, quotes,
+    renewals, reports, sales_groups, sequences, sources, workspace,
 )
 from .session import WorkspaceRequired
 
@@ -31,5 +31,8 @@ router.include_router(erp_materials.router)
 router.include_router(products.router)
 router.include_router(quotes.router)
 router.include_router(renewals.router)
+router.include_router(accounts.router)
+router.include_router(sales_groups.router)
+router.include_router(reports.router)
 
 __all__ = ["router", "WorkspaceRequired"]

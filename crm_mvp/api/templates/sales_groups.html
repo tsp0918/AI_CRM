@@ -1,0 +1,40 @@
+{% extends "_base.html" %}
+
+{% block title %}セールスグループ | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<h1>セールスグループ</h1>
+<p class="subtitle">
+  売上レポートを営業組織単位で集計するための軽量なグループタグです。担当者名(自由記述)とは独立しています。
+</p>
+
+{% if groups %}
+<div class="card">
+  <ul style="font-size:13px; padding-left:18px; margin:0;">
+    {% for g in groups %}
+    <li>{% if g.parent_group_id %}└ {% endif %}{{ g.name }}{% if g.description %} — <span class="muted">{{ g.description }}</span>{% endif %}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% else %}
+<div class="card"><div class="empty-state">まだセールスグループがありません。</div></div>
+{% endif %}
+
+<div class="card">
+  <h2>+ セールスグループを追加</h2>
+  <form method="post" action="/ui/sales-groups/new">
+    <label for="name">グループ名</label>
+    <input type="text" id="name" name="name" required placeholder="例: 東日本営業部">
+    <label for="parent_group_id">親グループ(任意)</label>
+    <select id="parent_group_id" name="parent_group_id">
+      <option value="">(トップレベル)</option>
+      {% for g in groups %}
+      <option value="{{ g.id }}">{{ g.name }}</option>
+      {% endfor %}
+    </select>
+    <label for="description">説明(任意)</label>
+    <input type="text" id="description" name="description">
+    <button type="submit" class="btn btn-sm">作成する</button>
+  </form>
+</div>
+{% endblock %}

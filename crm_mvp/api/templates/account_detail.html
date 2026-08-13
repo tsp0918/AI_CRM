@@ -1,0 +1,73 @@
+{% extends "_base.html" %}
+
+{% block title %}{{ account.name }} | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<p><a href="/ui/accounts">&larr; 取引先一覧に戻る</a></p>
+<h1>{{ account.name }}</h1>
+<p class="subtitle">
+  {% if parent %}親取引先: <a href="/ui/accounts/{{ parent.id }}">{{ parent.name }}</a>{% else %}トップレベルの取引先{% endif %}
+  {% if account.country %} / {{ account.country }}{% endif %}
+  {% if account.external_system %} / <span class="mono">{{ account.external_system }}:{{ account.external_id }}</span>{% endif %}
+</p>
+
+{% if children %}
+<div class="card">
+  <h2>子取引先({{ children | length }}件)</h2>
+  <ul style="font-size:13px; padding-left:18px; margin:0;">
+    {% for c in children %}
+    <li><a href="/ui/accounts/{{ c.id }}">{{ c.name }}</a></li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>商談履歴({{ engagements | length }}件)</h2>
+  <p class="subtitle" style="margin-bottom:12px;">
+    継続/Upsell/Cross-sellの親子リンクの有無を問わず、この取引先に紐づく商談をすべて表示します。
+  </p>
+  {% if engagements %}
+  <table>
+    <thead><tr><th>商談名</th><th>ステージ</th><th>金額</th><th>関係性</th><th>作成日</th></tr></thead>
+    <tbody>
+      {% for e in engagements %}
+      <tr>
+        <td><a href="/ui/engagements/{{ e.id }}">{{ e.name }}</a></td>
+        <td><span class="badge badge-stage-{{ e.stage }}">{{ stage_labels.get(e.stage, e.stage) }}</span></td>
+        <td class="mono">{% if e.amount %}{{ "{:,.0f}".format(e.amount) }} {{ e.currency }}{% else %}—{% endif %}</td>
+        <td>{% if e.relationship_type %}<span class="badge">{{ relationship_type_labels.get(e.relationship_type, e.relationship_type) }}</span>{% else %}—{% endif %}</td>
+        <td class="mono" style="font-size:11px;">{{ e.created_at.strftime("%Y-%m-%d") }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">まだ商談がありません。</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>紐付け済みリード({{ leads | length }}件)</h2>
+  <p class="subtitle" style="margin-bottom:12px;">
+    商談化前のリードでも、この取引先(または法人グループ)に手動で紐付けておけば、
+    Account-based Marketingのアタック先選定にそのまま使えます。
+  </p>
+  {% if leads %}
+  <table>
+    <thead><tr><th>企業名</th><th>氏名</th><th>状況</th></tr></thead>
+    <tbody>
+      {% for l in leads %}
+      <tr>
+        <td>{{ l.company_name }}</td>
+        <td><a href="/ui/leads/{{ l.id }}">{{ l.full_name }}</a></td>
+        <td>{{ lead_status_labels.get(l.status, l.status) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">紐付け済みのリードはありません。</div>
+  {% endif %}
+</div>
+{% endblock %}

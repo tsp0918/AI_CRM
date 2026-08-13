@@ -19,6 +19,23 @@
   ({{ parent_account.name if parent_account else "—" }})
 </p>
 {% endif %}
+<p class="subtitle">
+  セールスグループ: {{ current_sales_group.name if current_sales_group else "未設定" }}
+  <details style="display:inline; margin-left:6px;">
+    <summary style="cursor:pointer; display:inline; color:#2563eb; font-size:12px;">変更</summary>
+    <form method="post" action="/ui/engagements/{{ engagement.id }}/sales-group" class="inline" style="margin-top:6px;">
+      <select name="sales_group_id" style="width:auto; display:inline-block;">
+        <option value="">(未設定)</option>
+        {% for g in sales_groups %}
+        <option value="{{ g.id }}" {% if current_sales_group and g.id == current_sales_group.id %}selected{% endif %}>
+          {% if g.parent_group_id %}└ {% endif %}{{ g.name }}
+        </option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="btn btn-sm btn-secondary">更新</button>
+    </form>
+  </details>
+</p>
 
 <!-- 客観的クロージング確度スコア -->
 <div class="card">

@@ -18,7 +18,7 @@ from ...enums import (
 from ...models import (
     Account, ActionItem, Campaign, Contract, Engagement, EngagementLineItem,
     ExtractionProposal, GraphNode, IngestionSource, Lead, Product,
-    QualificationSlot, Quote, Waiver,
+    QualificationSlot, Quote, SalesGroup, Waiver,
 )
 from ...services.action_items import (
     assign_action_item, complete_action_item, dismiss_action_item,
@@ -31,6 +31,7 @@ from ...services.engagement_relationships import (
     create_child_engagement, list_child_engagements,
 )
 from ...services.pricing import add_line_item, list_line_items, remove_line_item
+from ...services.sales_groups import list_sales_groups_tree_ordered
 from ...services.quoting import (
     create_contract, create_quote_from_engagement, list_contract_line_items,
     list_contracts, list_quote_line_items, list_quotes, update_contract_status,
@@ -57,6 +58,7 @@ def engagement_new_form(
     session: Session = Depends(get_ui_db_session),
 ) -> HTMLResponse:
     context = base_context(session, ui_session, active_nav="new")
+    context.update({"sales_groups": list_sales_groups_tree_ordered(session, ui_session.tenant_id)})
     return templates.TemplateResponse(request, "engagement_new.html", context)
 
 
@@ -64,6 +66,7 @@ def engagement_new_form(
 def engagement_new_submit(
     account_name: str = Form(...),
     engagement_name: str = Form(...),
+    sales_group_id: str = Form(""),
     ui_session: UiSession = Depends(require_ui_session),
     session: Session = Depends(get_ui_db_session),
 ) -> RedirectResponse:
@@ -79,6 +82,7 @@ def engagement_new_submit(
     engagement = Engagement(
         tenant_id=ui_session.tenant_id, account_id=account.id,
         name=engagement_name.strip(), stage=Stage.LEAD,
+        sales_group_id=uuid.UUID(sales_group_id) if sales_group_id.strip() else None,
     )
     session.add(engagement)
     session.commit()
@@ -205,6 +209,10 @@ def engagement_detail(
         if parent_engagement:
             parent_account = session.get(Account, parent_engagement.account_id)
     child_engagements = list_child_engagements(session, ui_session.tenant_id, engagement.id)
+    sales_groups = list_sales_groups_tree_ordered(session, ui_session.tenant_id)
+    current_sales_group = (
+        session.get(SalesGroup, engagement.sales_group_id) if engagement.sales_group_id else None
+    )
 
     context = base_context(
         session, ui_session, active_nav="dashboard", flash=flash, flash_type=flash_type,
@@ -233,6 +241,7 @@ def engagement_detail(
         "parent_engagement": parent_engagement, "parent_account": parent_account,
         "child_engagements": child_engagements,
         "relationship_type_values": list(EngagementRelationshipType),
+        "sales_groups": sales_groups, "current_sales_group": current_sales_group,
     })
     return templates.TemplateResponse(request, "engagement_detail.html", context)
 
@@ -677,3 +686,26 @@ def create_child_engagement_ui(
     return redirect_with_flash(
         f"/ui/engagements/{child.id}", f"商談「{child.name}」を作成しました",
     )
+
+
+# --- セールスグループ(売上レポート用の営業組織タグ) ---------------------------
+
+@router.post("/ui/engagements/{engagement_id}/sales-group")
+def update_sales_group_ui(
+    engagement_id: uuid.UUID,
+    sales_group_id: str = Form(""),
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> RedirectResponse:
+    engagement = _get_engagement_or_404(session, ui_session, engagement_id)
+    if sales_group_id.strip():
+        group = session.get(SalesGroup, uuid.UUID(sales_group_id))
+        if group is None or group.tenant_id != ui_session.tenant_id:
+            return redirect_with_flash(
+                f"/ui/engagements/{engagement_id}", "セールスグループが見つかりません", "error",
+            )
+        engagement.sales_group_id = group.id
+    else:
+        engagement.sales_group_id = None
+    session.commit()
+    return redirect_with_flash(f"/ui/engagements/{engagement_id}", "セールスグループを更新しました")

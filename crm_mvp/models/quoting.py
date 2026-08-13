@@ -73,6 +73,17 @@ class Contract(Base, UUIDPk, Timestamped, Provenance, TenantScoped):
     total_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
     currency: Mapped[str] = mapped_column(String(3), default="JPY")
 
+    # ERP側の実契約/受注ID(2026-08-13 ユーザー要望)。将来、ERPのSalesOrder/
+    # BillingDocumentと同期する際のキーになる — Account/Engagementと同じ
+    # external_system/external_id パターン。
+    external_system: Mapped[str | None] = mapped_column(String(32))
+    external_id: Mapped[str | None] = mapped_column(String(128))
+    # ERPから実際に出荷・請求された金額の累積(将来の同期で埋まる)。
+    # NULLの間は total_amount(契約金額)を実売上の代用として扱う —
+    # 売上レポートは realized_amount があればそちらを優先する設計にして、
+    # 同期が始まった時にレポート側の変更を不要にする。
+    realized_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+
 
 class ContractLineItem(Base, UUIDPk, TenantScoped):
     __tablename__ = "contract_line_item"
