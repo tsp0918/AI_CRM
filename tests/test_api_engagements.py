@@ -212,6 +212,68 @@ class TestGraph:
         assert body["nodes"][0]["label"] == "決裁者(氏名未確認)"
         assert body["nodes"][0]["is_placeholder"] is True
 
+    def test_stance_and_influence_are_masked_by_default(
+        self, api_client, db_session, tenant_id,
+    ):
+        """§7.3: 実在の個人に対する主観評価は既定で非表示にする。"""
+        from crm_mvp.enums import BuyingCenterRole, Stance
+        from crm_mvp.models import EngagementRole, GraphNode
+
+        account, engagement = create_account_and_engagement(db_session, tenant_id)
+        node = GraphNode(
+            tenant_id=tenant_id, account_id=account.id,
+            placeholder_label="決裁者(氏名未確認)",
+        )
+        db_session.add(node)
+        db_session.flush()
+        db_session.add(EngagementRole(
+            tenant_id=tenant_id, engagement_id=engagement.id, node_id=node.id,
+            roles=[BuyingCenterRole.DECIDER.value], stance=Stance.OPPONENT,
+            influence=5,
+        ))
+        db_session.commit()
+
+        masked = api_client.get(f"/engagements/{engagement.id}/graph").json()
+        assert masked["nodes"][0]["stance"] is None
+        assert masked["nodes"][0]["influence"] is None
+        # roles / access_level は主観評価ではないのでマスクしない
+        assert masked["nodes"][0]["roles"] == ["decider"]
+
+        unmasked = api_client.get(
+            f"/engagements/{engagement.id}/graph?include_sensitive=true"
+        ).json()
+        assert unmasked["nodes"][0]["stance"] == "opponent"
+        assert unmasked["nodes"][0]["influence"] == 5
+
+    def test_graph_svg_does_not_color_by_stance_by_default(
+        self, api_client, db_session, tenant_id,
+    ):
+        from crm_mvp.enums import AccessLevel, Stance
+        from crm_mvp.models import EngagementRole, GraphNode
+
+        account, engagement = create_account_and_engagement(db_session, tenant_id)
+        node = GraphNode(
+            tenant_id=tenant_id, account_id=account.id, placeholder_label="A",
+        )
+        db_session.add(node)
+        db_session.flush()
+        # 塗り色(fillcolor)は style に "filled" が無い(=未接触/dashed)と
+        # Graphviz 側で無視されるため、接触済みノードで検証する。
+        db_session.add(EngagementRole(
+            tenant_id=tenant_id, engagement_id=engagement.id, node_id=node.id,
+            stance=Stance.OPPONENT, access_level=AccessLevel.CONTACTED,
+        ))
+        db_session.commit()
+
+        masked = api_client.get(f"/engagements/{engagement.id}/graph.svg")
+        # OPPONENT の塗り色(#f7c5c5)が既定では出ない
+        assert "#f7c5c5" not in masked.text
+
+        unmasked = api_client.get(
+            f"/engagements/{engagement.id}/graph.svg?include_sensitive=true"
+        )
+        assert "#f7c5c5" in unmasked.text
+
     def test_graph_svg_renders(self, api_client, db_session, tenant_id):
         account, engagement = create_account_and_engagement(db_session, tenant_id)
         db_session.add(GraphNode(

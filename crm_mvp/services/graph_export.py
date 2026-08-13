@@ -57,7 +57,13 @@ def load_graph_data(
 
 def build_graph_json(
     session: Session, tenant_id: uuid.UUID, engagement: Engagement,
+    *, include_sensitive: bool = False,
 ) -> dict:
+    """§7.3: stance / influence は実在の個人に対する主観評価であり、
+    取引先本人の閲覧資料への混入・退職者の持ち出し・開示請求のリスクが
+    ある。モデル層ではなくこの出力層で既定マスクする(方針決定済み)。
+    include_sensitive=True を明示的に渡した場合のみ実値を返す。
+    """
     nodes, edges, roles = load_graph_data(session, tenant_id, engagement)
     return {
         "nodes": [
@@ -68,8 +74,14 @@ def build_graph_json(
                 "org_unit": n.org_unit,
                 "is_placeholder": n.contact_id is None,
                 "roles": roles[n.id].roles if n.id in roles else [],
-                "stance": (roles[n.id].stance if n.id in roles else Stance.UNKNOWN),
-                "influence": roles[n.id].influence if n.id in roles else 3,
+                "stance": (
+                    roles[n.id].stance if include_sensitive and n.id in roles
+                    else None
+                ),
+                "influence": (
+                    roles[n.id].influence if include_sensitive and n.id in roles
+                    else None
+                ),
                 "access_level": (
                     roles[n.id].access_level if n.id in roles else AccessLevel.NONE
                 ),
@@ -89,7 +101,11 @@ def build_graph_json(
 
 def build_graph_dot(
     session: Session, tenant_id: uuid.UUID, engagement: Engagement,
+    *, include_sensitive: bool = False,
 ) -> graphviz.Digraph:
+    """§7.3: 既定では stance で色分けしない(全ノード中立色)。
+    include_sensitive=True のときのみ態度で塗り分ける。
+    """
     nodes, edges, roles = load_graph_data(session, tenant_id, engagement)
 
     dot = graphviz.Digraph(
@@ -108,7 +124,9 @@ def build_graph_dot(
             sub.attr(rank="same")
             for n in layer_nodes:
                 role = roles.get(n.id)
-                stance = role.stance if role else Stance.UNKNOWN
+                stance = (
+                    role.stance if include_sensitive and role else Stance.UNKNOWN
+                )
                 access = role.access_level if role else AccessLevel.NONE
                 sub.node(
                     str(n.id),

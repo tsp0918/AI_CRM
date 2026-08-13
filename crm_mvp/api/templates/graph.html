@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>バイヤー相関図{% if account_name %} — {{ account_name }}{% endif %}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, "Hiragino Kaku Gothic ProN", "Helvetica Neue", Arial, sans-serif;
+      color: #1f2937;
+      background: #f9fafb;
+    }
+    header {
+      background: #111827;
+      color: white;
+      padding: 14px 20px;
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    header h1 { font-size: 16px; margin: 0; }
+    header .subtitle { font-size: 13px; color: #d1d5db; }
+
+    form.toolbar {
+      display: flex;
+      align-items: end;
+      gap: 12px;
+      padding: 12px 20px;
+      background: white;
+      border-bottom: 1px solid #e5e7eb;
+      flex-wrap: wrap;
+    }
+    form.toolbar label {
+      display: flex;
+      flex-direction: column;
+      font-size: 11px;
+      color: #555;
+      gap: 2px;
+    }
+    form.toolbar input {
+      font-size: 13px;
+      padding: 6px 8px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      min-width: 280px;
+      font-family: monospace;
+    }
+    form.toolbar button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      background: #2563eb;
+      color: white;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .error-banner {
+      background: #fef2f2;
+      color: #991b1b;
+      padding: 10px 20px;
+      font-size: 13px;
+      border-bottom: 1px solid #fecaca;
+    }
+    .empty-state {
+      padding: 40px 20px;
+      color: #888;
+      text-align: center;
+    }
+
+    main { padding: 20px; }
+    .svg-panel {
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 16px;
+      overflow: auto;
+      margin-bottom: 24px;
+    }
+    .svg-panel svg { max-width: 100%; height: auto; }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 24px;
+      font-size: 13px;
+    }
+    caption {
+      text-align: left;
+      font-weight: 600;
+      font-size: 13px;
+      padding: 10px 12px;
+      background: #f3f4f6;
+    }
+    th, td {
+      text-align: left;
+      padding: 8px 12px;
+      border-top: 1px solid #eee;
+    }
+    th { color: #555; font-weight: 600; font-size: 12px; }
+    .badge {
+      display: inline-block;
+      border: 1px solid #999;
+      border-radius: 6px;
+      padding: 1px 6px;
+      font-size: 11px;
+      margin-right: 4px;
+      background: #f3f4f6;
+    }
+    .placeholder-mark { color: #9ca3af; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>バイヤー相関図</h1>
+    {% if engagement %}
+      <span class="subtitle">{{ account_name }} / {{ engagement.name }}({{ engagement.stage }})</span>
+    {% endif %}
+  </header>
+
+  <form class="toolbar" method="get" action="/ui/graph">
+    <label>
+      Tenant ID
+      <input type="text" name="tenant_id" value="{{ tenant_id }}"
+             placeholder="00000000-0000-0000-0000-000000000001">
+    </label>
+    <label>
+      Engagement ID
+      <input type="text" name="engagement_id" value="{{ engagement_id }}">
+    </label>
+    <label style="flex-direction: row; align-items: center; gap: 6px;">
+      <input type="checkbox" name="include_sensitive" value="true"
+             {% if include_sensitive %}checked{% endif %}>
+      態度・影響力を表示(社内限定)
+    </label>
+    <button type="submit">相関図を表示</button>
+  </form>
+
+  {% if error %}
+    <div class="error-banner">{{ error }}</div>
+  {% endif %}
+  {% if include_sensitive and svg %}
+    <div class="error-banner" style="background:#fffbeb; color:#92400e; border-color:#fde68a;">
+      態度・影響力を表示中です。取引先に渡す資料には含めないでください(§7.3)。
+    </div>
+  {% endif %}
+
+  <main>
+    {% if svg %}
+      <div class="svg-panel">
+        {{ svg | safe }}
+      </div>
+
+      <table>
+        <caption>登場人物({{ nodes | length }}名)</caption>
+        <thead>
+          <tr>
+            <th>氏名</th><th>所属</th><th>役割</th><th>態度</th>
+            <th>影響力</th><th>接触状況</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for n in nodes %}
+          <tr style="background: {{ stance_colors.get(n.stance, '#fff') }}22;">
+            <td>
+              {{ n.label }}
+              {% if n.is_placeholder %}<span class="placeholder-mark">(氏名未確認)</span>{% endif %}
+            </td>
+            <td>{{ n.org_unit or "—" }}</td>
+            <td>
+              {% for r in n.roles %}<span class="badge">{{ role_labels.get(r, r) }}</span>{% endfor %}
+              {% if not n.roles %}—{% endif %}
+            </td>
+            <td>{{ stance_labels.get(n.stance, n.stance) if n.stance is not none else "非表示" }}</td>
+            <td>{{ n.influence if n.influence is not none else "非表示" }}</td>
+            <td>{{ access_level_labels.get(n.access_level, n.access_level) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <table>
+        <caption>関係({{ edges | length }}件)</caption>
+        <thead>
+          <tr><th>から</th><th>種別</th><th>へ</th><th>証拠強度</th><th>順序</th></tr>
+        </thead>
+        <tbody>
+          {% for e in edges %}
+          <tr>
+            <td>{{ e.from_label }}</td>
+            <td>{{ e.type }}</td>
+            <td>{{ e.to_label }}</td>
+            <td>{{ e.confidence }}</td>
+            <td>{{ e.sequence if e.sequence is not none else "—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% elif engagement %}
+      <div class="empty-state">この案件にはまだノードが登録されていません。</div>
+    {% elif not error %}
+      <div class="empty-state">Tenant ID と Engagement ID を入力して表示してください。</div>
+    {% endif %}
+  </main>
+</body>
+</html>

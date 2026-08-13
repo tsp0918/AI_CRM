@@ -168,20 +168,27 @@ def create_waiver(
 @router.get("/{engagement_id}/graph")
 def get_graph(
     engagement_id: uuid.UUID,
+    include_sensitive: bool = False,
     tenant_id: uuid.UUID = Depends(get_tenant_id),
     session: Session = Depends(get_session),
 ) -> dict:
+    """§7.3: stance/influence は include_sensitive=true を明示しない限りマスクする。"""
     engagement = _get_engagement(session, tenant_id, engagement_id)
-    return build_graph_json(session, tenant_id, engagement)
+    return build_graph_json(
+        session, tenant_id, engagement, include_sensitive=include_sensitive,
+    )
 
 
 @router.get("/{engagement_id}/graph.svg")
 def get_graph_svg(
     engagement_id: uuid.UUID,
+    include_sensitive: bool = False,
     tenant_id: uuid.UUID = Depends(get_tenant_id),
     session: Session = Depends(get_session),
 ) -> Response:
     engagement = _get_engagement(session, tenant_id, engagement_id)
-    dot = build_graph_dot(session, tenant_id, engagement)
+    dot = build_graph_dot(
+        session, tenant_id, engagement, include_sensitive=include_sensitive,
+    )
     svg = dot.pipe(format="svg").decode("utf-8")
     return Response(content=svg, media_type="image/svg+xml")
