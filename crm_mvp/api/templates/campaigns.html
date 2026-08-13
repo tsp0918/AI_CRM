@@ -1,15 +1,15 @@
 {% extends "_base.html" %}
 
-{% block title %}Campaigns | Compliance-aware Agentic CRM{% endblock %}
+{% block title %}キャンペーン | Compliance-aware Agentic CRM{% endblock %}
 
 {% block content %}
-<h1>Campaigns</h1>
-<p class="subtitle">Marketing/Inside Sales施策のROI集計単位。Lead登録時に紐付けます。</p>
+<h1>キャンペーン</h1>
+<p class="subtitle">Marketing/Inside Sales施策のROI集計単位。リード登録時に紐付けます。</p>
 
 {% if rows %}
 <div class="card" style="padding:0;">
   <table>
-    <thead><tr><th>名前</th><th>種別</th><th>担当チーム</th><th>Lead数</th><th>案件化数</th></tr></thead>
+    <thead><tr><th>名前</th><th>種別</th><th>担当チーム</th><th>リード数</th><th>案件化数</th></tr></thead>
     <tbody>
       {% for row in rows %}
       <tr>

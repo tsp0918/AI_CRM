@@ -77,7 +77,7 @@ def load_activity_log(
     for t in transitions:
         detail = f"{t.from_stage or '(新規)'} → {t.to_stage}"
         if t.waiver_id:
-            detail += "(Waiver 適用)"
+            detail += "(例外承認 適用)"
         missing = (t.gate_snapshot or {}).get("missing") or []
         if missing:
             detail += f" / 当時の未充足項目: {', '.join(missing)}"
@@ -120,7 +120,7 @@ def load_activity_log(
     ).scalars().all()
     for w in waivers:
         items.append(ActivityItem(
-            occurred_at=w.approved_at, kind="waiver", title="Waiver 発行",
+            occurred_at=w.approved_at, kind="waiver", title="例外承認 発行",
             detail=w.reason, actor=_format_actor(w.written_by),
         ))
 

@@ -47,7 +47,7 @@
   </h2>
   {% if row.entries %}
   <table>
-    <thead><tr><th>Lead</th><th>会社</th><th>ステータス</th><th>このステップの状態</th><th>生成日時</th></tr></thead>
+    <thead><tr><th>リード</th><th>会社</th><th>ステータス</th><th>このステップの状態</th><th>生成日時</th></tr></thead>
     <tbody>
       {% for entry in row.entries %}
       <tr>
@@ -61,7 +61,7 @@
     </tbody>
   </table>
   {% else %}
-  <div class="empty-state">まだ到達したLeadがいません。</div>
+  <div class="empty-state">まだ到達したリードがいません。</div>
   {% endif %}
 </div>
 {% endfor %}

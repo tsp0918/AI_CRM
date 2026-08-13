@@ -13,7 +13,11 @@ from ...models import ExtractionProposal
 from .session import UiSession
 
 STAGE_LABELS = {
-    "lead": "リード", "prospect": "見込み", "qualified": "案件化",
+    # "lead" ステージの表示名は Lead(見込み客)エンティティと語が衝突して
+    # 紛らわしいため、「引き合い」とする(§7 Lead基盤の追加に伴う整理。
+    # enum値 "lead" 自体は変えない — Lead→案件化変換の際のスコア等が
+    # 参照している可能性があり、表示ラベルだけを分離する)。
+    "lead": "引き合い", "prospect": "見込み", "qualified": "案件化",
     "proposal": "提案", "negotiation": "最終交渉",
     "closed_won": "受注", "closed_lost": "失注",
 }

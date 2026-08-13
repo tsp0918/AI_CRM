@@ -188,7 +188,7 @@ class TestEngagementLeadSummary:
 
         detail_resp = ui_client.get(engagement_url)
         assert detail_resp.status_code == 200
-        assert "Lead発生経緯" in detail_resp.text
+        assert "リード発生経緯" in detail_resp.text
         assert lead.full_name in detail_resp.text
         assert "案件化時点の温度" in detail_resp.text
 
@@ -201,4 +201,4 @@ class TestEngagementLeadSummary:
 
         resp = ui_client.get(f"/ui/engagements/{engagement.id}")
         assert resp.status_code == 200
-        assert "Lead発生経緯" not in resp.text
+        assert "リード発生経緯" not in resp.text
