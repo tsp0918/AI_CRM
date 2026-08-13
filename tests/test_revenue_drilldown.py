@@ -3,15 +3,17 @@ filter_facts/facts_by_engagement)と、関連するUIのテスト。"""
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from decimal import Decimal
 
 from tests.conftest import create_account_and_engagement
 
 from crm_mvp.enums import EngagementRelationshipType, Stage
-from crm_mvp.models import Product, ProductGroup, SalesGroup
+from crm_mvp.models import Product, ProductGroup, SalesGroup, User
 from crm_mvp.services import revenue_report as rr
 from crm_mvp.services.engagement_relationships import create_child_engagement
 from crm_mvp.services.pricing import add_line_item
+from crm_mvp.services.stage_transitions import apply_stage_transition
 
 
 def make_product(db_session, tenant_id, **overrides) -> Product:
@@ -127,3 +129,117 @@ class TestAggregateByWithId:
         rows = [{"amount": Decimal("100"), "key": "a"}]
         result = rr.aggregate_by(rows, lambda r: r["key"])
         assert result[0]["id"] is None
+
+
+class TestAllStageLineItemFacts:
+    def test_includes_pipeline_deals(self, db_session, tenant_id):
+        _, eng = create_account_and_engagement(db_session, tenant_id, stage=Stage.QUALIFIED)
+        product = make_product(db_session, tenant_id, name="パイプライン商品")
+        add_line_item(db_session, tenant_id, eng, product=product, quantity=1, discount_rate=Decimal("0"))
+        db_session.commit()
+
+        assert rr.line_item_facts(db_session, tenant_id) == []
+        all_facts = rr.all_stage_line_item_facts(db_session, tenant_id)
+        assert len(all_facts) == 1
+        assert all_facts[0]["stage"] == Stage.QUALIFIED
+        assert all_facts[0]["product"].name == "パイプライン商品"
+
+    def test_period_date_from_stage_transition_for_closed_won(self, db_session, tenant_id):
+        from datetime import datetime, timezone
+
+        from crm_mvp.models import StageTransition
+
+        _, eng = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
+        product = make_product(db_session, tenant_id)
+        add_line_item(db_session, tenant_id, eng, product=product, quantity=1, discount_rate=Decimal("0"))
+        db_session.add(StageTransition(
+            tenant_id=tenant_id, engagement_id=eng.id,
+            from_stage=Stage.NEGOTIATION, to_stage=Stage.CLOSED_WON,
+            occurred_at=datetime(2026, 3, 15, tzinfo=timezone.utc),
+            written_by="human:tester",
+        ))
+        db_session.commit()
+
+        facts = rr.all_stage_line_item_facts(db_session, tenant_id)
+        assert facts[0]["period_date"] == date(2026, 3, 15)
+
+    def test_period_date_uses_expected_close_date_for_pipeline(self, db_session, tenant_id):
+        _, eng = create_account_and_engagement(db_session, tenant_id, stage=Stage.PROPOSAL)
+        eng.expected_close_date = date.today() + timedelta(days=30)
+        product = make_product(db_session, tenant_id)
+        add_line_item(db_session, tenant_id, eng, product=product, quantity=1, discount_rate=Decimal("0"))
+        db_session.commit()
+
+        facts = rr.all_stage_line_item_facts(db_session, tenant_id)
+        assert facts[0]["period_date"] == eng.expected_close_date
+
+    def test_owner_user_resolved(self, db_session, tenant_id):
+        user = User(
+            tenant_id=tenant_id, name="担当 太郎", email="tanaka@example.com",
+            function="Sales", role="BDM",
+        )
+        db_session.add(user)
+        db_session.flush()
+        _, eng = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
+        eng.owner_user_id = user.id
+        product = make_product(db_session, tenant_id)
+        add_line_item(db_session, tenant_id, eng, product=product, quantity=1, discount_rate=Decimal("0"))
+        db_session.commit()
+
+        facts = rr.all_stage_line_item_facts(db_session, tenant_id)
+        assert facts[0]["owner_user"].id == user.id
+
+
+class TestBuildDimensions:
+    def test_period_label_month(self):
+        dims = rr.build_dimensions(period_granularity="month")
+        fact = {"period_date": date(2026, 3, 15)}
+        assert dims["period"].key_fn(fact) == "2026-03"
+
+    def test_period_label_quarter(self):
+        dims = rr.build_dimensions(period_granularity="quarter")
+        fact = {"period_date": date(2026, 8, 1)}
+        assert dims["period"].key_fn(fact) == "2026-Q3"
+
+    def test_period_label_none(self):
+        dims = rr.build_dimensions()
+        assert dims["period"].key_fn({"period_date": None}) == "未設定"
+
+    def test_stage_dimension_uses_report_labels(self):
+        dims = rr.build_dimensions()
+        assert dims["stage"].key_fn({"stage": "closed_won"}) == "受注"
+
+    def test_owner_dimension_unassigned(self):
+        dims = rr.build_dimensions()
+        assert dims["owner"].key_fn({"owner_user": None}) == "未割当"
+
+
+class TestPivot:
+    def test_single_axis_matches_aggregate_by(self):
+        dims = rr.build_dimensions()
+        facts = [
+            {"amount": Decimal("100"), "product_group": None},
+            {"amount": Decimal("50"), "product_group": None},
+        ]
+        result = rr.pivot(facts, dims["product_group"])
+        assert "rows" in result
+        assert result["rows"][0]["amount"] == Decimal("150")
+        assert result["rows"][0]["count"] == 2
+
+    def test_two_axis_cross_tab(self):
+        dims = rr.build_dimensions()
+        group_a = ProductGroup(name="A")
+        group_b = ProductGroup(name="B")
+        facts = [
+            {"amount": Decimal("100"), "product_group": group_a, "relationship_type": "new_business"},
+            {"amount": Decimal("30"), "product_group": group_a, "relationship_type": "renewal"},
+            {"amount": Decimal("20"), "product_group": group_b, "relationship_type": "renewal"},
+        ]
+        result = rr.pivot(facts, dims["product_group"], dims["relationship_type"])
+        assert set(result["row_labels"]) == {"A", "B"}
+        assert set(result["col_labels"]) == {"新規", "更新(Renewal)"}
+        assert result["cells"]["A"]["新規"]["amount"] == Decimal("100")
+        assert result["cells"]["A"]["更新(Renewal)"]["amount"] == Decimal("30")
+        assert result["row_totals"]["A"] == Decimal("130")
+        assert result["col_totals"]["更新(Renewal)"] == Decimal("50")
+        assert result["grand_total"] == Decimal("150")

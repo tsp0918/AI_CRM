@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
+from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from typing import Callable
 
@@ -26,7 +28,7 @@ from sqlalchemy.orm import Session
 from ..enums import Stage
 from ..models import (
     Account, Contract, ContractLineItem, Engagement, EngagementLineItem,
-    Product, ProductGroup, SalesGroup,
+    Product, ProductGroup, SalesGroup, StageTransition, User,
 )
 from .account_hierarchy import list_accounts
 
@@ -145,6 +147,12 @@ RELATIONSHIP_TYPE_REPORT_LABELS = {
     "upsell": "Upsell", "cross_sell": "Cross-sell",
 }
 
+STAGE_REPORT_LABELS = {
+    "lead": "引き合い", "prospect": "見込み", "qualified": "案件化",
+    "proposal": "提案", "negotiation": "最終交渉",
+    "closed_won": "受注", "closed_lost": "失注",
+}
+
 
 # --- ドリルダウン基盤(2026-08-14) ------------------------------------------
 #
@@ -153,12 +161,16 @@ RELATIONSHIP_TYPE_REPORT_LABELS = {
 # 絞り込んでも、同じファクト行から一貫して集計・一覧できるようにする
 # ための共通基盤 — 将来の自由な動的レポート機能もこの上に構築する想定。
 
-def line_item_facts(session: Session, tenant_id: uuid.UUID) -> list[dict]:
-    engagement_ids = session.execute(
-        select(Engagement.id).where(
-            Engagement.tenant_id == tenant_id, Engagement.stage == Stage.CLOSED_WON,
-        )
-    ).scalars().all()
+def _line_item_facts(
+    session: Session, tenant_id: uuid.UUID, stages: list[Stage] | None,
+) -> list[dict]:
+    """stages=None は全ステージ対象(動的レポートビルダー用)。closed_won の
+    エンゲージメントは従来どおり Contract 優先(無ければ EngagementLineItem)、
+    それ以外のステージは Contract が存在しないため常に EngagementLineItem。"""
+    query = select(Engagement.id).where(Engagement.tenant_id == tenant_id)
+    if stages is not None:
+        query = query.where(Engagement.stage.in_(stages))
+    engagement_ids = session.execute(query).scalars().all()
     if not engagement_ids:
         return []
 
@@ -167,12 +179,15 @@ def line_item_facts(session: Session, tenant_id: uuid.UUID) -> list[dict]:
             select(Engagement).where(Engagement.id.in_(engagement_ids))
         ).scalars()
     }
+    closed_won_ids = [
+        eid for eid, e in engagements.items() if e.stage == Stage.CLOSED_WON
+    ]
 
     contracts = session.execute(
         select(Contract).where(
-            Contract.tenant_id == tenant_id, Contract.engagement_id.in_(engagement_ids),
+            Contract.tenant_id == tenant_id, Contract.engagement_id.in_(closed_won_ids),
         )
-    ).scalars().all()
+    ).scalars().all() if closed_won_ids else []
     contract_engagement_by_contract_id = {c.id: c.engagement_id for c in contracts}
     engagements_with_contract = {c.engagement_id for c in contracts}
     contract_ids = list(contract_engagement_by_contract_id)
@@ -220,6 +235,28 @@ def line_item_facts(session: Session, tenant_id: uuid.UUID) -> list[dict]:
             select(SalesGroup).where(SalesGroup.tenant_id == tenant_id)
         ).scalars()
     }
+    users = {
+        u.id: u for u in session.execute(
+            select(User).where(User.tenant_id == tenant_id)
+        ).scalars()
+    }
+
+    # 実測クローズ日: closed_won への最新の StageTransition.occurred_at。
+    # 同じエンゲージメントに複数回 to_stage=CLOSED_WON の遷移があっても
+    # 最新のものを採用する(occurred_at 降順で最初に見た行を残す)。
+    closed_at_by_engagement: dict[uuid.UUID, date] = {}
+    if closed_won_ids:
+        transitions = session.execute(
+            select(StageTransition)
+            .where(
+                StageTransition.tenant_id == tenant_id,
+                StageTransition.engagement_id.in_(closed_won_ids),
+                StageTransition.to_stage == Stage.CLOSED_WON,
+            )
+            .order_by(StageTransition.occurred_at.desc())
+        ).scalars()
+        for t in transitions:
+            closed_at_by_engagement.setdefault(t.engagement_id, t.occurred_at.date())
 
     facts = []
     for eng_id, li in line_items_with_engagement:
@@ -229,6 +266,12 @@ def line_item_facts(session: Session, tenant_id: uuid.UUID) -> list[dict]:
         account = accounts.get(engagement.account_id)
         root_account = _walk_to_root(account, accounts)
         sales_group = sales_groups.get(engagement.sales_group_id) if engagement.sales_group_id else None
+        owner_user = users.get(engagement.owner_user_id) if engagement.owner_user_id else None
+
+        if engagement.stage == Stage.CLOSED_WON:
+            period_date = closed_at_by_engagement.get(eng_id) or engagement.updated_at.date()
+        else:
+            period_date = engagement.expected_close_date
 
         facts.append({
             "engagement": engagement, "line_item": li, "amount": li.line_total,
@@ -236,14 +279,28 @@ def line_item_facts(session: Session, tenant_id: uuid.UUID) -> list[dict]:
             "account": account, "root_account": root_account,
             "sales_group": sales_group,
             "relationship_type": engagement.relationship_type or "new_business",
+            "stage": engagement.stage, "owner_user": owner_user,
+            "period_date": period_date,
         })
     return facts
+
+
+def line_item_facts(session: Session, tenant_id: uuid.UUID) -> list[dict]:
+    return _line_item_facts(session, tenant_id, stages=[Stage.CLOSED_WON])
+
+
+def all_stage_line_item_facts(session: Session, tenant_id: uuid.UUID) -> list[dict]:
+    """動的レポートビルダー用: ステージを問わず全商談の明細をファクト化する。
+    パイプライン中の商談は EngagementLineItem(現在の構成)、closed_won は
+    line_item_facts() と同じロジックで実績額を返す。"""
+    return _line_item_facts(session, tenant_id, stages=None)
 
 
 def filter_facts(
     facts: list[dict], *, product_group_id: uuid.UUID | None = None,
     product_id: uuid.UUID | None = None, account_id: uuid.UUID | None = None,
     sales_group_id: uuid.UUID | None = None, relationship_type: str | None = None,
+    stage: str | None = None, owner_user_id: uuid.UUID | None = None,
 ) -> list[dict]:
     """account_id は「そのAccount自身」だけでなく法人グループの子孫すべてを
     含めたい場面が多いため、呼び出し側で get_family_account_ids を使って
@@ -260,6 +317,10 @@ def filter_facts(
         if sales_group_id and (not f["sales_group"] or f["sales_group"].id != sales_group_id):
             return False
         if relationship_type and f["relationship_type"] != relationship_type:
+            return False
+        if stage and f["stage"] != stage:
+            return False
+        if owner_user_id and (not f["owner_user"] or f["owner_user"].id != owner_user_id):
             return False
         return True
 
@@ -278,3 +339,120 @@ def facts_by_engagement(facts: list[dict]) -> list[dict]:
         )
         row["amount"] += f["amount"]
     return sorted(by_engagement.values(), key=lambda r: r["amount"], reverse=True)
+
+
+# --- 動的レポートビルダー(2026-08-14) ---------------------------------------
+#
+# 「行の軸」「列の軸(任意)」をユーザーが自由に選び、line_item_facts /
+# all_stage_line_item_facts の上でクロス集計するための基盤。個々の軸の
+# 意味(ラベルの作り方・ドリルダウン先ID)は Dimension が持ち、画面側は
+# DIMENSION_CHOICES から key を選ぶだけでよい。
+
+def _period_label(f: dict, granularity: str) -> str:
+    d: date | None = f["period_date"]
+    if d is None:
+        return "未設定"
+    if granularity == "quarter":
+        q = (d.month - 1) // 3 + 1
+        return f"{d.year}-Q{q}"
+    return f"{d.year}-{d.month:02d}"
+
+
+@dataclass(slots=True)
+class Dimension:
+    key: str
+    label: str
+    key_fn: Callable[[dict], str]
+    id_fn: Callable[[dict], object | None] | None = None
+
+
+def build_dimensions(period_granularity: str = "month") -> dict[str, Dimension]:
+    """period_granularity("month"|"quarter")に応じて period 軸のラベルの
+    粒度を切り替える以外は固定のディメンション一覧を返す。"""
+    return {
+        "product": Dimension(
+            "product", "商品",
+            lambda f: f["product"].name if f["product"] else "未分類",
+            lambda f: f["product"].id if f["product"] else None,
+        ),
+        "product_group": Dimension(
+            "product_group", "商品グループ",
+            lambda f: f["product_group"].name if f["product_group"] else "未分類",
+            lambda f: f["product_group"].id if f["product_group"] else None,
+        ),
+        "account": Dimension(
+            "account", "取引先(法人グループ)",
+            lambda f: f["root_account"].name if f["root_account"] else "—",
+            lambda f: f["root_account"].id if f["root_account"] else None,
+        ),
+        "sales_group": Dimension(
+            "sales_group", "セールスグループ",
+            lambda f: f["sales_group"].name if f["sales_group"] else "未設定",
+            lambda f: f["sales_group"].id if f["sales_group"] else None,
+        ),
+        "relationship_type": Dimension(
+            "relationship_type", "関係性",
+            lambda f: RELATIONSHIP_TYPE_REPORT_LABELS.get(
+                f["relationship_type"], f["relationship_type"],
+            ),
+            lambda f: f["relationship_type"],
+        ),
+        "stage": Dimension(
+            "stage", "ステージ",
+            lambda f: STAGE_REPORT_LABELS.get(f["stage"], f["stage"]),
+            lambda f: f["stage"],
+        ),
+        "owner": Dimension(
+            "owner", "担当者",
+            lambda f: f["owner_user"].name if f["owner_user"] else "未割当",
+            lambda f: f["owner_user"].id if f["owner_user"] else None,
+        ),
+        "period": Dimension(
+            "period", "期間",
+            lambda f: _period_label(f, period_granularity),
+        ),
+    }
+
+
+def pivot(
+    facts: list[dict], row_dim: Dimension, col_dim: Dimension | None = None,
+) -> dict:
+    """col_dim が None なら aggregate_by 相当の1軸集計(行ラベル・金額・
+    件数・id)を "rows" に入れて返す。col_dim があれば行×列のクロス集計を
+    "row_labels"/"col_labels"/"cells"/"row_totals"/"col_totals"/"grand_total"
+    に入れて返す(cells は cells[row_label][col_label] でセルを引ける
+    ネスト辞書 — Jinja テンプレート側からタプルキーを使わずに引けるように
+    するため、あえて (row, col) タプルキーの単一辞書にしていない)。"""
+    if col_dim is None:
+        return {"rows": aggregate_by(facts, row_dim.key_fn, row_dim.id_fn)}
+
+    cells: dict[str, dict[str, dict]] = defaultdict(
+        lambda: defaultdict(lambda: {"amount": Decimal("0"), "count": 0})
+    )
+    row_totals: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+    col_totals: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+    row_ids: dict[str, object | None] = {}
+    grand_total = Decimal("0")
+
+    for f in facts:
+        row_label = row_dim.key_fn(f)
+        col_label = col_dim.key_fn(f)
+        cell = cells[row_label][col_label]
+        cell["amount"] += f["amount"]
+        cell["count"] += 1
+        row_totals[row_label] += f["amount"]
+        col_totals[col_label] += f["amount"]
+        grand_total += f["amount"]
+        if row_dim.id_fn is not None and row_label not in row_ids:
+            row_ids[row_label] = row_dim.id_fn(f)
+
+    row_labels = sorted(row_totals, key=lambda k: row_totals[k], reverse=True)
+    col_labels = sorted(col_totals)
+    cells = {row: dict(col_map) for row, col_map in cells.items()}
+
+    return {
+        "row_labels": row_labels, "col_labels": col_labels,
+        "row_ids": row_ids, "cells": dict(cells),
+        "row_totals": dict(row_totals), "col_totals": dict(col_totals),
+        "grand_total": grand_total,
+    }

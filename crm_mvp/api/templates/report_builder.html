@@ -1,0 +1,168 @@
+{% extends "_base.html" %}
+
+{% block title %}レポートビルダー | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<h1>レポートビルダー</h1>
+<p class="subtitle">
+  行・列の軸を自由に選んで、商談明細を好きな切り口で集計できます。列を「なし」にすると単純な内訳表、
+  列も選ぶとクロス集計(ピボット)表になります。
+</p>
+
+<div class="card">
+  <form method="get" action="/ui/reports/builder">
+    <div class="field-row">
+      <div>
+        <label for="rows">行の軸</label>
+        <select id="rows" name="rows">
+          {% for key, label in dimension_choices %}
+          <option value="{{ key }}" {% if key == selected_rows %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="cols">列の軸(任意・クロス集計)</label>
+        <select id="cols" name="cols">
+          <option value="" {% if not selected_cols %}selected{% endif %}>なし</option>
+          {% for key, label in dimension_choices %}
+          <option value="{{ key }}" {% if key == selected_cols %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="field-row">
+      <div>
+        <label for="scope">対象範囲</label>
+        <select id="scope" name="scope">
+          <option value="closed_won" {% if scope == "closed_won" %}selected{% endif %}>受注実績のみ(closed_won)</option>
+          <option value="all" {% if scope == "all" %}selected{% endif %}>パイプライン含む全ステージ</option>
+        </select>
+      </div>
+      <div>
+        <label for="granularity">期間の粒度(期間軸を使う場合)</label>
+        <select id="granularity" name="granularity">
+          <option value="month" {% if granularity == "month" %}selected{% endif %}>月次</option>
+          <option value="quarter" {% if granularity == "quarter" %}selected{% endif %}>四半期</option>
+        </select>
+      </div>
+    </div>
+
+    <p class="subtitle" style="margin-top:16px;">絞り込み(任意)</p>
+    <div class="field-row">
+      <div>
+        <label for="product_group_id">商品グループ</label>
+        <select id="product_group_id" name="product_group_id">
+          <option value="">すべて</option>
+          {% for g in product_groups %}
+          <option value="{{ g.id }}" {% if product_group_id == g.id|string %}selected{% endif %}>{{ g.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="sales_group_id">セールスグループ</label>
+        <select id="sales_group_id" name="sales_group_id">
+          <option value="">すべて</option>
+          {% for g in sales_groups %}
+          <option value="{{ g.id }}" {% if sales_group_id == g.id|string %}selected{% endif %}>{{ g.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="field-row">
+      <div>
+        <label for="relationship_type">関係性</label>
+        <select id="relationship_type" name="relationship_type">
+          <option value="">すべて</option>
+          {% for value, label in relationship_type_choices %}
+          <option value="{{ value }}" {% if relationship_type == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="stage">ステージ</label>
+        <select id="stage" name="stage">
+          <option value="">すべて</option>
+          {% for value, label in stage_choices %}
+          <option value="{{ value }}" {% if stage == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="owner_user_id">担当者</label>
+        <select id="owner_user_id" name="owner_user_id">
+          <option value="">すべて</option>
+          {% for u in users %}
+          <option value="{{ u.id }}" {% if owner_user_id == u.id|string %}selected{% endif %}>{{ u.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <button type="submit" style="margin-top:12px;">集計する</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>集計結果</h2>
+  <p class="subtitle" style="margin-bottom:12px;">
+    金額合計 <span class="mono" style="font-weight:700;">{{ "{:,.0f}".format(total_amount) }}</span> JPY /
+    明細数 <span class="mono">{{ deal_count }}</span>件
+  </p>
+
+  {% if is_pivot %}
+    {% if row_labels %}
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>{{ row_dim_label }}</th>
+            {% for col in col_labels %}<th>{{ col }}</th>{% endfor %}
+            <th>合計</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in row_labels %}
+          <tr>
+            <td>{{ row }}</td>
+            {% for col in col_labels %}
+            {% set cell = cells.get(row, {}).get(col) %}
+            <td class="mono">{{ "{:,.0f}".format(cell.amount) if cell else "—" }}</td>
+            {% endfor %}
+            <td class="mono" style="font-weight:700;">{{ "{:,.0f}".format(row_totals[row]) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td style="font-weight:700;">合計</td>
+            {% for col in col_labels %}
+            <td class="mono" style="font-weight:700;">{{ "{:,.0f}".format(col_totals[col]) }}</td>
+            {% endfor %}
+            <td class="mono" style="font-weight:700;">{{ "{:,.0f}".format(grand_total) }}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">データがありません。</div>
+    {% endif %}
+  {% else %}
+    {% if rows %}
+    <table>
+      <thead><tr><th>{{ row_dim_label }}</th><th>金額</th><th>件数</th></tr></thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td class="mono">{{ "{:,.0f}".format(row.amount) }}</td>
+          <td class="mono">{{ row.count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">データがありません。</div>
+    {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

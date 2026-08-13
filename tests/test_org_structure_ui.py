@@ -267,3 +267,78 @@ class TestRevenueDrilldownUi:
     def test_drilldown_renders_with_no_data(self, ui_client):
         resp = ui_client.get("/ui/reports/revenue/drill-down")
         assert resp.status_code == 200
+
+
+class TestReportBuilderUi:
+    def test_renders_with_no_data(self, ui_client):
+        resp = ui_client.get("/ui/reports/builder")
+        assert resp.status_code == 200
+
+    def test_single_axis_shows_closed_won_only_by_default(self, ui_client, db_session, tenant_id):
+        _, closed = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
+        product = Product(
+            tenant_id=tenant_id, name="受注商品", list_price=Decimal("100000"), currency="JPY",
+        )
+        db_session.add(product)
+        db_session.flush()
+        add_line_item(db_session, tenant_id, closed, product=product, quantity=1, discount_rate=Decimal("0"))
+
+        _, pipeline = create_account_and_engagement(db_session, tenant_id, stage=Stage.PROPOSAL)
+        pipeline_product = Product(
+            tenant_id=tenant_id, name="未受注商品", list_price=Decimal("50000"), currency="JPY",
+        )
+        db_session.add(pipeline_product)
+        db_session.flush()
+        add_line_item(db_session, tenant_id, pipeline, product=pipeline_product, quantity=1, discount_rate=Decimal("0"))
+        db_session.commit()
+
+        resp = ui_client.get("/ui/reports/builder?rows=product")
+        assert resp.status_code == 200
+        assert "受注商品" in resp.text
+        assert "未受注商品" not in resp.text
+
+    def test_scope_all_includes_pipeline(self, ui_client, db_session, tenant_id):
+        _, pipeline = create_account_and_engagement(db_session, tenant_id, stage=Stage.PROPOSAL)
+        product = Product(
+            tenant_id=tenant_id, name="パイプライン商品", list_price=Decimal("50000"), currency="JPY",
+        )
+        db_session.add(product)
+        db_session.flush()
+        add_line_item(db_session, tenant_id, pipeline, product=product, quantity=1, discount_rate=Decimal("0"))
+        db_session.commit()
+
+        resp = ui_client.get("/ui/reports/builder?rows=product&scope=all")
+        assert resp.status_code == 200
+        assert "パイプライン商品" in resp.text
+
+    def test_two_axis_renders_pivot_table(self, ui_client, db_session, tenant_id):
+        _, eng = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
+        product = Product(
+            tenant_id=tenant_id, name="ピボット商品", list_price=Decimal("100000"), currency="JPY",
+        )
+        db_session.add(product)
+        db_session.flush()
+        add_line_item(db_session, tenant_id, eng, product=product, quantity=1, discount_rate=Decimal("0"))
+        db_session.commit()
+
+        resp = ui_client.get("/ui/reports/builder?rows=product_group&cols=relationship_type")
+        assert resp.status_code == 200
+        assert "100,000" in resp.text
+
+    def test_filters_by_stage(self, ui_client, db_session, tenant_id):
+        _, eng = create_account_and_engagement(db_session, tenant_id, stage=Stage.NEGOTIATION)
+        product = Product(
+            tenant_id=tenant_id, name="交渉中商品", list_price=Decimal("70000"), currency="JPY",
+        )
+        db_session.add(product)
+        db_session.flush()
+        add_line_item(db_session, tenant_id, eng, product=product, quantity=1, discount_rate=Decimal("0"))
+        db_session.commit()
+
+        resp = ui_client.get("/ui/reports/builder?rows=product&scope=all&stage=negotiation")
+        assert resp.status_code == 200
+        assert "交渉中商品" in resp.text
+
+        resp_other = ui_client.get("/ui/reports/builder?rows=product&scope=all&stage=proposal")
+        assert resp_other.status_code == 200
+        assert "交渉中商品" not in resp_other.text
