@@ -115,3 +115,40 @@ class TestRenewalsPage:
 
         resp = ui_client.get("/ui/renewals")
         assert eng.name not in resp.text
+
+    def test_buckets_by_days_remaining(self, ui_client, db_session, tenant_id):
+        _, overdue_eng = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
+        overdue_eng.name = "超過案件"
+        make_contract(db_session, tenant_id, overdue_eng, end_date=date.today() - timedelta(days=5))
+
+        _, soon_eng = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
+        soon_eng.name = "90日以内案件"
+        make_contract(db_session, tenant_id, soon_eng, end_date=date.today() + timedelta(days=80))
+        db_session.commit()
+
+        resp = ui_client.get("/ui/renewals?within_days=365")
+        assert resp.status_code == 200
+        overdue_section = resp.text.split('badge-gate-block">超過')[1].split("〜90日")[0]
+        assert "超過案件" in overdue_section
+        assert "90日以内案件" not in overdue_section
+
+    def test_dim_account_filters_renewals(self, ui_client, db_session, tenant_id):
+        from crm_mvp.models import Account
+
+        account_a = Account(tenant_id=tenant_id, name="更新フィルタA社")
+        db_session.add(account_a)
+        db_session.flush()
+        _, eng_a = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
+        eng_a.account_id = account_a.id
+        eng_a.name = "A社の更新案件"
+        make_contract(db_session, tenant_id, eng_a, end_date=date.today() + timedelta(days=10))
+
+        _, eng_b = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
+        eng_b.name = "B社の更新案件"
+        make_contract(db_session, tenant_id, eng_b, end_date=date.today() + timedelta(days=10))
+        db_session.commit()
+
+        resp = ui_client.get(f"/ui/renewals?dim=account&account_id={account_a.id}")
+        assert resp.status_code == 200
+        assert "A社の更新案件" in resp.text
+        assert "B社の更新案件" not in resp.text

@@ -8,41 +8,110 @@
   終了日が {{ within_days }} 日以内に迫っている ACTIVE な契約のうち、まだ更新商談が作られていないものです。
 </p>
 
-{% if candidates %}
-<div class="card" style="padding:0;">
-  <table>
-    <thead>
-      <tr><th>契約番号</th><th>案件</th><th>取引先</th><th>金額</th><th>契約終了日</th><th>残り日数</th><th></th></tr>
-    </thead>
-    <tbody>
-      {% for c in candidates %}
-      {% set ctx = renewal_context.get(c.id, {}) %}
-      <tr>
-        <td class="mono">{{ c.contract_number }}</td>
-        <td>{% if ctx.engagement %}<a href="/ui/engagements/{{ ctx.engagement.id }}">{{ ctx.engagement.name }}</a>{% else %}—{% endif %}</td>
-        <td>{{ ctx.account.name if ctx.account else "—" }}</td>
-        <td class="mono">{{ "{:,.0f}".format(c.total_amount) }} {{ c.currency }}</td>
-        <td class="mono">{{ c.end_date }}</td>
-        <td>
-          {% if ctx.days_remaining is not none and ctx.days_remaining < 0 %}
-            <span class="badge badge-gate-block">{{ -ctx.days_remaining }}日超過</span>
-          {% elif ctx.days_remaining is not none and ctx.days_remaining <= 30 %}
-            <span class="badge badge-gate-warn">残り{{ ctx.days_remaining }}日</span>
-          {% else %}
-            <span class="muted">残り{{ ctx.days_remaining }}日</span>
-          {% endif %}
-        </td>
-        <td>
-          <form method="post" action="/ui/renewals/{{ c.id }}/start" class="inline">
-            <button type="submit" class="btn btn-sm">更新商談を作成</button>
-          </form>
-        </td>
-      </tr>
+<div class="facet-layout">
+  <aside class="facet-rail">
+    <div class="facet-tabs">
+      {% for key, label in dim_choices %}
+      <a href="/ui/renewals?dim={{ key }}" class="{% if dim == key %}active{% endif %}">{{ label }}</a>
       {% endfor %}
-    </tbody>
-  </table>
+    </div>
+    <a href="/ui/renewals" class="facet-link {% if not dim %}active{% endif %}">
+      全体 <span class="facet-count">{{ total_count }}</span>
+    </a>
+
+    {% if dim == "owner" %}
+      {% for row in owner_rail %}
+      <a href="/ui/renewals?dim=owner&owner_user_id={{ row.user.id }}"
+         class="facet-link {% if owner_user_id == row.user.id|string %}active{% endif %}">
+        {{ row.user.name }} <span class="facet-count">{{ row.count }}</span>
+      </a>
+      {% endfor %}
+    {% elif dim == "product" %}
+      {% for row in product_rail %}
+      <div class="facet-tree">
+        <a href="/ui/renewals?dim=product&product_group_id={{ row.group.id }}"
+           class="facet-link {% if product_group_id == row.group.id|string %}active{% endif %}">
+          {{ row.group.name }} <span class="facet-count">{{ row.count }}</span>
+        </a>
+        {% if row.children %}
+        <details {% if product_group_id in row.children | map(attribute="group.id") | map("string") | list %}open{% endif %}>
+          <summary style="cursor:pointer; font-size:11px; color:#9ca3af; padding:2px 10px;">子グループ({{ row.children | length }})</summary>
+          {% for child in row.children %}
+          <a href="/ui/renewals?dim=product&product_group_id={{ child.group.id }}"
+             class="facet-link {% if product_group_id == child.group.id|string %}active{% endif %}">
+            {{ child.group.name }} <span class="facet-count">{{ child.count }}</span>
+          </a>
+          {% endfor %}
+        </details>
+        {% endif %}
+      </div>
+      {% endfor %}
+    {% elif dim == "account" %}
+      {% for row in account_rail %}
+      <div class="facet-tree">
+        <a href="/ui/renewals?dim=account&account_id={{ row.account.id }}"
+           class="facet-link {% if account_id == row.account.id|string %}active{% endif %}">
+          {{ row.account.name }} <span class="facet-count">{{ row.count }}</span>
+        </a>
+        {% if row.children %}
+        <details {% if account_id in row.children | map(attribute="account.id") | map("string") | list %}open{% endif %}>
+          <summary style="cursor:pointer; font-size:11px; color:#9ca3af; padding:2px 10px;">子取引先({{ row.children | length }})</summary>
+          {% for child in row.children %}
+          <a href="/ui/renewals?dim=account&account_id={{ child.account.id }}"
+             class="facet-link {% if account_id == child.account.id|string %}active{% endif %}">
+            {{ child.account.name }} <span class="facet-count">{{ child.count }}</span>
+          </a>
+          {% endfor %}
+        </details>
+        {% endif %}
+      </div>
+      {% endfor %}
+    {% endif %}
+  </aside>
+
+  <div class="facet-main">
+    {% if bucketed %}
+      {% for bucket, facts in bucketed %}
+      <div class="card">
+        <h2>
+          <span class="badge {{ bucket_badge.get(bucket, '') }}">{{ bucket_labels.get(bucket, bucket) }}</span>
+          ({{ facts | length }}件)
+        </h2>
+        <table>
+          <thead>
+            <tr><th>契約番号</th><th>案件</th><th>取引先</th><th>金額</th><th>契約終了日</th><th>残り日数</th><th></th></tr>
+          </thead>
+          <tbody>
+            {% for f in facts %}
+            {% set c = f.document %}
+            {% set ctx = renewal_context.get(c.id, {}) %}
+            <tr>
+              <td class="mono">{{ c.contract_number }}</td>
+              <td>{% if f.engagement %}<a href="/ui/engagements/{{ f.engagement.id }}">{{ f.engagement.name }}</a>{% else %}—{% endif %}</td>
+              <td>{{ f.account.name if f.account else "—" }}</td>
+              <td class="mono">{{ "{:,.0f}".format(c.total_amount) }} {{ c.currency }}</td>
+              <td class="mono">{{ c.end_date }}</td>
+              <td>
+                {% if ctx.days_remaining is not none and ctx.days_remaining < 0 %}
+                  <span class="muted">{{ -ctx.days_remaining }}日超過</span>
+                {% else %}
+                  <span class="muted">残り{{ ctx.days_remaining }}日</span>
+                {% endif %}
+              </td>
+              <td>
+                <form method="post" action="/ui/renewals/{{ c.id }}/start" class="inline">
+                  <button type="submit" class="btn btn-sm">更新商談を作成</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endfor %}
+    {% else %}
+    <div class="card"><div class="empty-state">更新対象の契約はありません。</div></div>
+    {% endif %}
+  </div>
 </div>
-{% else %}
-<div class="card"><div class="empty-state">更新対象の契約はありません。</div></div>
-{% endif %}
 {% endblock %}
