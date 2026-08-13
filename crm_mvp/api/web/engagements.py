@@ -12,8 +12,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ...enums import (
-    Confidence, ContractStatus, Criterion, ProposalStatus, QuoteStatus, Stage,
-    VerificationMethod,
+    Confidence, ContractStatus, Criterion, EngagementRelationshipType,
+    ProposalStatus, QuoteStatus, Stage, VerificationMethod,
 )
 from ...models import (
     Account, ActionItem, Campaign, Contract, Engagement, EngagementLineItem,
@@ -27,6 +27,9 @@ from ...services.action_items import (
 from ...services.activity_log import load_activity_log
 from ...services.confidence_score import compute_confidence_score, score_reasons
 from ...services.decay_policy import compute_decays_at
+from ...services.engagement_relationships import (
+    create_child_engagement, list_child_engagements,
+)
 from ...services.pricing import add_line_item, list_line_items, remove_line_item
 from ...services.quoting import (
     create_contract, create_quote_from_engagement, list_contract_line_items,
@@ -195,6 +198,14 @@ def engagement_detail(
         c.id: list_contract_line_items(session, ui_session.tenant_id, c.id) for c in contracts
     }
 
+    parent_engagement = None
+    parent_account = None
+    if engagement.parent_engagement_id:
+        parent_engagement = session.get(Engagement, engagement.parent_engagement_id)
+        if parent_engagement:
+            parent_account = session.get(Account, parent_engagement.account_id)
+    child_engagements = list_child_engagements(session, ui_session.tenant_id, engagement.id)
+
     context = base_context(
         session, ui_session, active_nav="dashboard", flash=flash, flash_type=flash_type,
     )
@@ -219,6 +230,9 @@ def engagement_detail(
         "contracts": contracts, "contract_line_items": contract_line_items,
         "quote_status_values": list(QuoteStatus),
         "contract_status_values": list(ContractStatus),
+        "parent_engagement": parent_engagement, "parent_account": parent_account,
+        "child_engagements": child_engagements,
+        "relationship_type_values": list(EngagementRelationshipType),
     })
     return templates.TemplateResponse(request, "engagement_detail.html", context)
 
@@ -637,3 +651,29 @@ def update_contract_status_ui(
     update_contract_status(contract, ContractStatus(status))
     session.commit()
     return redirect_with_flash(f"/ui/engagements/{engagement_id}", f"契約を「{status}」にしました")
+
+
+# --- 継続/Upsell/Cross-sell(親商談との紐付け) ----------------------------------
+
+@router.post("/ui/engagements/{engagement_id}/child-engagements")
+def create_child_engagement_ui(
+    engagement_id: uuid.UUID,
+    name: str = Form(...),
+    relationship_type: str = Form(...),
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> RedirectResponse:
+    parent = _get_engagement_or_404(session, ui_session, engagement_id)
+    try:
+        child = create_child_engagement(
+            session, ui_session.tenant_id, parent,
+            relationship_type=EngagementRelationshipType(relationship_type), name=name,
+        )
+    except ValueError as exc:
+        session.rollback()
+        return redirect_with_flash(f"/ui/engagements/{engagement_id}", str(exc), "error")
+
+    session.commit()
+    return redirect_with_flash(
+        f"/ui/engagements/{child.id}", f"商談「{child.name}」を作成しました",
+    )

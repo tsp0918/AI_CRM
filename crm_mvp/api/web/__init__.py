@@ -10,8 +10,8 @@ from fastapi import APIRouter
 
 from . import (
     campaigns, dashboard, engagements, erp_business_partners, erp_materials,
-    forecast_risk, graph, leads, products, proposals, quotes, sequences, sources,
-    workspace,
+    forecast_risk, graph, leads, products, proposals, quotes, renewals,
+    sequences, sources, workspace,
 )
 from .session import WorkspaceRequired
 
@@ -30,5 +30,6 @@ router.include_router(erp_business_partners.router)
 router.include_router(erp_materials.router)
 router.include_router(products.router)
 router.include_router(quotes.router)
+router.include_router(renewals.router)
 
 __all__ = ["router", "WorkspaceRequired"]

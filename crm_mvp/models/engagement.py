@@ -54,6 +54,16 @@ class Engagement(Base, UUIDPk, Timestamped, TenantScoped):
         PGUUID(as_uuid=True), ForeignKey("lead.id", ondelete="SET NULL"), index=True
     )
 
+    # 契約済み(クロージング)案件からの継続/Upsell/Cross-sellを追跡する普遍的な
+    # 構造。親案件が削除されても派生案件の履歴は残したいため SET NULL。
+    # relationship_type は parent_engagement_id が設定されている場合のみ意味を
+    # 持つ(services/engagement_relationships.py の create_child_engagement 経由
+    # でのみ両方同時に設定される)。
+    parent_engagement_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("engagement.id", ondelete="SET NULL"), index=True
+    )
+    relationship_type: Mapped[str | None] = mapped_column(String(20))
+
     slots: Mapped[list["QualificationSlot"]] = relationship(
         back_populates="engagement", cascade="all, delete-orphan"
     )

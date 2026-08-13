@@ -262,3 +262,13 @@ class FeftaJudgment(StrEnum):
     REJECTED = "REJECTED"         # 却下
     UNKNOWN = "UNKNOWN"
     NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
+class EngagementRelationshipType(StrEnum):
+    """親商談(クロージング済みの案件)との関係。Engagement.parent_engagement_id
+    が設定されている場合のみ意味を持つ(2026-08-13 ユーザー要望: 契約済み案件の
+    継続/Upsell/Cross-sellを親商談に紐付けて追跡できる普遍的な構造)。"""
+
+    RENEWAL = "renewal"           # 契約更新(同一商品構成での継続)
+    UPSELL = "upsell"             # 既存契約の増量・上位グレード化
+    CROSS_SELL = "cross_sell"     # 別カテゴリの商品の追加販売

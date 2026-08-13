@@ -1,0 +1,48 @@
+{% extends "_base.html" %}
+
+{% block title %}契約更新管理 | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<h1>契約更新管理</h1>
+<p class="subtitle">
+  終了日が {{ within_days }} 日以内に迫っている ACTIVE な契約のうち、まだ更新商談が作られていないものです。
+</p>
+
+{% if candidates %}
+<div class="card" style="padding:0;">
+  <table>
+    <thead>
+      <tr><th>契約番号</th><th>案件</th><th>取引先</th><th>金額</th><th>契約終了日</th><th>残り日数</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for c in candidates %}
+      {% set ctx = renewal_context.get(c.id, {}) %}
+      <tr>
+        <td class="mono">{{ c.contract_number }}</td>
+        <td>{% if ctx.engagement %}<a href="/ui/engagements/{{ ctx.engagement.id }}">{{ ctx.engagement.name }}</a>{% else %}—{% endif %}</td>
+        <td>{{ ctx.account.name if ctx.account else "—" }}</td>
+        <td class="mono">{{ "{:,.0f}".format(c.total_amount) }} {{ c.currency }}</td>
+        <td class="mono">{{ c.end_date }}</td>
+        <td>
+          {% if ctx.days_remaining is not none and ctx.days_remaining < 0 %}
+            <span class="badge badge-gate-block">{{ -ctx.days_remaining }}日超過</span>
+          {% elif ctx.days_remaining is not none and ctx.days_remaining <= 30 %}
+            <span class="badge badge-gate-warn">残り{{ ctx.days_remaining }}日</span>
+          {% else %}
+            <span class="muted">残り{{ ctx.days_remaining }}日</span>
+          {% endif %}
+        </td>
+        <td>
+          <form method="post" action="/ui/renewals/{{ c.id }}/start" class="inline">
+            <button type="submit" class="btn btn-sm">更新商談を作成</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card"><div class="empty-state">更新対象の契約はありません。</div></div>
+{% endif %}
+{% endblock %}

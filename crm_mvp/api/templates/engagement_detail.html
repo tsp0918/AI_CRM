@@ -11,6 +11,14 @@
   {% if engagement.amount %} / {{ "{:,.0f}".format(engagement.amount) }} {{ engagement.currency }}{% endif %}
   / <a href="/ui/engagements/{{ engagement.id }}/activity">活動ログを見る &rarr;</a>
 </p>
+{% if parent_engagement %}
+<p class="subtitle">
+  親商談:
+  <span class="badge">{{ relationship_type_labels.get(engagement.relationship_type, engagement.relationship_type) }}</span>
+  <a href="/ui/engagements/{{ parent_engagement.id }}">{{ parent_engagement.name }}</a>
+  ({{ parent_account.name if parent_account else "—" }})
+</p>
+{% endif %}
 
 <!-- 客観的クロージング確度スコア -->
 <div class="card">
@@ -323,6 +331,48 @@
   </details>
   {% else %}
   <p class="subtitle" style="margin-top:14px;">商品構成(または承諾済みの見積もり)が無いため契約を発行できません。</p>
+  {% endif %}
+</div>
+
+<!-- 派生商談(継続/Upsell/Cross-sell) -->
+<div class="card">
+  <h2>派生商談(継続/Upsell/Cross-sell)</h2>
+  <p class="subtitle" style="margin-bottom:12px;">
+    この商談を起点にした継続(更新)・Upsell・Cross-sellの商談です。
+  </p>
+  {% if child_engagements %}
+  <table>
+    <thead><tr><th>種別</th><th>商談名</th><th>ステージ</th><th>金額</th></tr></thead>
+    <tbody>
+      {% for c in child_engagements %}
+      <tr>
+        <td><span class="badge">{{ relationship_type_labels.get(c.relationship_type, c.relationship_type) }}</span></td>
+        <td><a href="/ui/engagements/{{ c.id }}">{{ c.name }}</a></td>
+        <td><span class="badge badge-stage-{{ c.stage }}">{{ stage_labels.get(c.stage, c.stage) }}</span></td>
+        <td class="mono">{% if c.amount %}{{ "{:,.0f}".format(c.amount) }} {{ c.currency }}{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">まだ派生商談がありません。</div>
+  {% endif %}
+
+  {% if engagement.stage == "closed_won" %}
+  <details style="margin-top:14px;">
+    <summary style="cursor:pointer; font-size:13px; color:#2563eb;">+ 継続/Upsell/Cross-sell商談を作成</summary>
+    <form method="post" action="/ui/engagements/{{ engagement.id }}/child-engagements" style="margin-top:10px; max-width:420px;">
+      <label for="relationship_type">種別</label>
+      <select id="relationship_type" name="relationship_type">
+        {% for r in relationship_type_values %}
+        <option value="{{ r.value }}">{{ relationship_type_labels.get(r.value, r.value) }}</option>
+        {% endfor %}
+      </select>
+      <label for="child_name">商談名</label>
+      <input type="text" id="child_name" name="name" required placeholder="例: {{ engagement.name }}(更新)">
+      <button type="submit" class="btn btn-sm">作成する</button>
+    </form>
+  </details>
   {% endif %}
 </div>
 

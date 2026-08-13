@@ -39,6 +39,10 @@ SOURCE_KIND_LABELS = {
     "calendar_sync": "会議同期(Outlook/Teams)",
 }
 
+RELATIONSHIP_TYPE_LABELS = {
+    "renewal": "更新(Renewal)", "upsell": "Upsell", "cross_sell": "Cross-sell",
+}
+
 
 def base_context(
     session: Session, ui_session: UiSession, active_nav: str,
@@ -60,6 +64,7 @@ def base_context(
         "criterion_labels": CRITERION_LABELS,
         "confidence_labels": CONFIDENCE_LABELS,
         "source_kind_labels": SOURCE_KIND_LABELS,
+        "relationship_type_labels": RELATIONSHIP_TYPE_LABELS,
     }
 
 
