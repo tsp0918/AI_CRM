@@ -232,6 +232,51 @@ class TestSourceIntake:
         assert source.participants == []
 
 
+class TestQuickNote:
+    def test_form_lists_recent_engagements(self, ui_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        resp = ui_client.get("/ui/quick-note")
+        assert resp.status_code == 200
+        assert engagement.name in resp.text
+
+    def test_submits_as_free_note_and_redirects_to_quick_note(
+        self, ui_client, db_session, tenant_id,
+    ):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        resp = ui_client.post(
+            "/ui/quick-note",
+            data={"engagement_id": str(engagement.id), "raw_text": "電話でのメモ"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert resp.headers["location"].startswith("/ui/quick-note")
+
+        source = db_session.query(IngestionSource).filter_by(
+            tenant_id=tenant_id, engagement_id=engagement.id,
+        ).one()
+        assert source.kind == "free_note"
+        assert source.processed_at is not None
+
+    def test_blank_text_is_rejected(self, ui_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        resp = ui_client.post(
+            "/ui/quick-note",
+            data={"engagement_id": str(engagement.id), "raw_text": "  "},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert "flash_type=error" in resp.headers["location"]
+        assert db_session.query(IngestionSource).filter_by(
+            tenant_id=tenant_id, engagement_id=engagement.id,
+        ).count() == 0
+
+
 class TestProposalInbox:
     def _make_pending_proposal(self, db_session, tenant_id, engagement):
         source = IngestionSource(

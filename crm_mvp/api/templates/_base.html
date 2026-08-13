@@ -175,6 +175,23 @@
       background: #f9fafb; border-left: 3px solid #d1d5db;
       padding: 8px 10px; font-size: 12px; color: #4b5563; margin: 6px 0;
     }
+
+    .quick-btn { background: #059669; }
+    .quick-btn:hover { background: #047857; }
+
+    /* モバイル: 商談直後・移動中でも崩れず、タップしやすいサイズを保つ */
+    @media (max-width: 640px) {
+      .topnav { flex-wrap: wrap; height: auto; padding: 10px 14px; row-gap: 8px; }
+      .topnav-spacer { flex-basis: 100%; height: 0; }
+      .topnav-actor { flex-wrap: wrap; font-size: 11px; }
+      main.page { padding: 16px 14px 48px; }
+      h1 { font-size: 18px; }
+      .card { padding: 14px 14px; }
+      .field-row { flex-direction: column; gap: 0; }
+      table { display: block; overflow-x: auto; white-space: nowrap; }
+      .btn { padding: 10px 16px; font-size: 14px; }
+      input[type=text], input[type=url], textarea, select { font-size: 16px; }
+    }
   </style>
   {% block extra_head %}{% endblock %}
 </head>
@@ -187,6 +204,7 @@
       提案承認{% if pending_count %}<span class="badge-count">{{ pending_count }}</span>{% endif %}
     </a>
     <a href="/ui/forecast-risk" class="{% if active_nav == 'forecast_risk' %}active{% endif %}">リスクレーダー</a>
+    <a href="/ui/quick-note" class="{% if active_nav == 'quick_note' %}active{% endif %}">⚡ クイック入力</a>
     <a href="/ui/engagements/new" class="{% if active_nav == 'new' %}active{% endif %}">+ 新規案件</a>
     <div class="topnav-spacer"></div>
     <div class="topnav-actor">

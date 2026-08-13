@@ -113,3 +113,69 @@ def source_new_submit(
     if outcome.claims == 0:
         message += "(この環境は LLM 未接続のため自動抽出は行われません)"
     return redirect_with_flash(f"/ui/engagements/{engagement_id}", message)
+
+
+# --- クイック入力(モバイル/商談直後向けの軽量版) -----------------------------
+#
+# 通常の情報投入フォームは種別選択・出席者欄など機能が多く、移動中や
+# 商談直後にその場で使うには重い。ここでは「案件を選ぶ」「本文を書く」
+# 「送る」の3手だけに絞った経路を別途用意する(自由メモ固定・出席者欄なし)。
+# 裏側のパイプラインは source_new_submit と完全に同じものを再利用する。
+
+@router.get("/ui/quick-note", response_class=HTMLResponse)
+def quick_note_form(
+    request: Request,
+    engagement_id: str = "",
+    flash: str | None = None,
+    flash_type: str = "info",
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> HTMLResponse:
+    engagements = session.execute(
+        select(Engagement).where(Engagement.tenant_id == ui_session.tenant_id)
+        .order_by(Engagement.updated_at.desc()).limit(20)
+    ).scalars().all()
+
+    context = base_context(
+        session, ui_session, active_nav="quick_note", flash=flash, flash_type=flash_type,
+    )
+    context.update({
+        "engagements": engagements, "preselected_engagement_id": engagement_id,
+    })
+    return templates.TemplateResponse(request, "quick_note.html", context)
+
+
+@router.post("/ui/quick-note")
+def quick_note_submit(
+    engagement_id: str = Form(...),
+    raw_text: str = Form(""),
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+    extractor: ExtractorPort = Depends(get_extractor),
+) -> RedirectResponse:
+    eid = uuid.UUID(engagement_id)
+    engagement = session.get(Engagement, eid)
+    if engagement is None or engagement.tenant_id != ui_session.tenant_id:
+        raise HTTPException(status_code=404, detail="engagement not found")
+
+    if not raw_text.strip():
+        return redirect_with_flash(
+            "/ui/quick-note", "本文を入力してください", "error",
+        )
+
+    source = IngestionSource(
+        tenant_id=ui_session.tenant_id, engagement_id=eid,
+        kind=SourceKind.FREE_NOTE, raw_text=raw_text,
+    )
+    session.add(source)
+    session.flush()
+
+    try:
+        outcome = process_source(session, ui_session.tenant_id, source, extractor=extractor)
+    except ValueError as exc:
+        session.rollback()
+        return redirect_with_flash("/ui/quick-note", f"処理に失敗しました: {exc}", "error")
+    session.commit()
+
+    message = f"{engagement.name} にメモを記録しました({outcome.claims}件抽出)"
+    return redirect_with_flash("/ui/quick-note", message)

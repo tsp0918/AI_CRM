@@ -1,0 +1,34 @@
+{% extends "_base.html" %}
+
+{% block title %}クイック入力 | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<h1>⚡ クイック入力</h1>
+<p class="subtitle">案件を選んで、思い出せるうちにそのまま書くだけ。種別選択や出席者欄は省略しています。</p>
+
+{% if not engagements %}
+<div class="card">
+  <div class="empty-state">
+    先に <a href="/ui/engagements/new">+ 新規案件</a> を作成してください。
+  </div>
+</div>
+{% else %}
+<div class="card" style="max-width: 520px;">
+  <form method="post" action="/ui/quick-note">
+    <label for="engagement_id">案件</label>
+    <select id="engagement_id" name="engagement_id" required>
+      <option value="">選択してください</option>
+      {% for e in engagements %}
+      <option value="{{ e.id }}" {% if preselected_engagement_id == e.id|string %}selected{% endif %}>{{ e.name }}</option>
+      {% endfor %}
+    </select>
+
+    <label for="raw_text">今の内容をそのまま</label>
+    <textarea id="raw_text" name="raw_text" required style="min-height:160px;"
+              placeholder="例: 田中さんと電話。予算は来期に確保見込み、決裁は工場長とのこと"></textarea>
+
+    <button type="submit" class="btn quick-btn" style="width:100%; padding:14px; font-size:16px;">送る</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}
