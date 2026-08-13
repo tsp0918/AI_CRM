@@ -228,3 +228,76 @@ class TestQuotesAndContracts:
         resp = ui_client.get("/ui/quotes")
         assert resp.status_code == 200
         assert "Q-" in resp.text
+
+    def test_default_view_shows_facet_tabs(self, ui_client):
+        resp = ui_client.get("/ui/quotes")
+        assert resp.status_code == 200
+        assert "担当別" in resp.text
+        assert "商品別" in resp.text
+        assert "取引先別" in resp.text
+
+    def test_dim_account_filters_to_selected_account(self, ui_client, db_session, tenant_id):
+        from crm_mvp.models import Account
+
+        account_a = Account(tenant_id=tenant_id, name="フィルタA社")
+        db_session.add(account_a)
+        db_session.flush()
+        _, engagement_a = create_account_and_engagement(db_session, tenant_id)
+        engagement_a.account_id = account_a.id
+        _, engagement_b = create_account_and_engagement(db_session, tenant_id)
+        product = make_product(db_session, tenant_id)
+        db_session.commit()
+
+        for eng in (engagement_a, engagement_b):
+            ui_client.post(
+                f"/ui/engagements/{eng.id}/line-items",
+                data={"product_id": str(product.id), "quantity": "1", "discount_rate": "0"},
+            )
+            ui_client.post(f"/ui/engagements/{eng.id}/quotes", data={})
+
+        resp = ui_client.get(f"/ui/quotes?dim=account&account_id={account_a.id}")
+        assert resp.status_code == 200
+        assert "見積もり(1件)" in resp.text
+
+    def test_dim_product_filters_by_product_group(self, ui_client, db_session, tenant_id):
+        from crm_mvp.models import ProductGroup
+
+        group_a = ProductGroup(tenant_id=tenant_id, name="フィルタグループA")
+        group_b = ProductGroup(tenant_id=tenant_id, name="フィルタグループB")
+        db_session.add_all([group_a, group_b])
+        db_session.flush()
+        product_a = make_product(db_session, tenant_id, name="商品A", product_group_id=group_a.id)
+        product_b = make_product(db_session, tenant_id, name="商品B", product_group_id=group_b.id)
+        _, engagement_a = create_account_and_engagement(db_session, tenant_id)
+        _, engagement_b = create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        ui_client.post(
+            f"/ui/engagements/{engagement_a.id}/line-items",
+            data={"product_id": str(product_a.id), "quantity": "1", "discount_rate": "0"},
+        )
+        ui_client.post(f"/ui/engagements/{engagement_a.id}/quotes", data={})
+        ui_client.post(
+            f"/ui/engagements/{engagement_b.id}/line-items",
+            data={"product_id": str(product_b.id), "quantity": "1", "discount_rate": "0"},
+        )
+        ui_client.post(f"/ui/engagements/{engagement_b.id}/quotes", data={})
+
+        resp = ui_client.get(f"/ui/quotes?dim=product&product_group_id={group_a.id}")
+        assert resp.status_code == 200
+        assert "見積もり(1件)" in resp.text
+
+    def test_status_section_groups_quotes(self, ui_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        product = make_product(db_session, tenant_id)
+        db_session.commit()
+
+        ui_client.post(
+            f"/ui/engagements/{engagement.id}/line-items",
+            data={"product_id": str(product.id), "quantity": "1", "discount_rate": "0"},
+        )
+        ui_client.post(f"/ui/engagements/{engagement.id}/quotes", data={})
+
+        resp = ui_client.get("/ui/quotes")
+        assert resp.status_code == 200
+        assert "下書き" in resp.text

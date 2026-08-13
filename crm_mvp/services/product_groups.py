@@ -59,3 +59,25 @@ def list_product_groups_tree_ordered(session: Session, tenant_id: uuid.UUID) -> 
 
     walk(None)
     return ordered
+
+
+def get_family_product_group_ids(
+    session: Session, tenant_id: uuid.UUID, group_id: uuid.UUID,
+) -> set[uuid.UUID]:
+    """指定した商品グループ自身とその子孫すべてのIDを返す(ロールアップ用)。
+    account_hierarchy.get_family_account_ids と同じBFSパターン。"""
+    groups = list_product_groups(session, tenant_id)
+    children_by_parent: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for g in groups:
+        if g.parent_group_id is not None:
+            children_by_parent.setdefault(g.parent_group_id, []).append(g.id)
+
+    family = {group_id}
+    frontier = [group_id]
+    while frontier:
+        current = frontier.pop()
+        for child_id in children_by_parent.get(current, []):
+            if child_id not in family:
+                family.add(child_id)
+                frontier.append(child_id)
+    return family

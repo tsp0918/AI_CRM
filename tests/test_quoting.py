@@ -203,3 +203,107 @@ class TestListQuotesAndContracts:
         assert len(qt.list_quotes(db_session, tenant_id, engagement_a.id)) == 1
         assert len(qt.list_quotes(db_session, tenant_id, engagement_b.id)) == 0
         assert len(qt.list_quotes(db_session, tenant_id)) == 1
+
+
+class TestDocumentFacts:
+    def test_quote_document_facts_carries_account_and_product(self, db_session, tenant_id):
+        from crm_mvp.models import Account, ProductGroup
+
+        account = Account(tenant_id=tenant_id, name="ファクト取引先")
+        db_session.add(account)
+        db_session.flush()
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        engagement.account_id = account.id
+        group = ProductGroup(tenant_id=tenant_id, name="ファクト商品グループ")
+        db_session.add(group)
+        db_session.flush()
+        product = make_product(db_session, tenant_id, product_group_id=group.id)
+        pr.add_line_item(
+            db_session, tenant_id, engagement, product=product,
+            quantity=1, discount_rate=Decimal("0"),
+        )
+        db_session.flush()
+        qt.create_quote_from_engagement(
+            db_session, tenant_id, engagement, valid_until=None, actor="human:ae-1",
+        )
+        db_session.commit()
+
+        facts = qt.quote_document_facts(db_session, tenant_id)
+        assert len(facts) == 1
+        assert facts[0]["account"].id == account.id
+        assert product.id in facts[0]["product_ids"]
+        assert group.id in facts[0]["product_group_ids"]
+
+    def test_empty_tenant_returns_empty_facts(self, db_session, tenant_id):
+        assert qt.quote_document_facts(db_session, tenant_id) == []
+        assert qt.contract_document_facts(db_session, tenant_id) == []
+
+
+class TestFilterDocuments:
+    def _make_quote_fact(self, db_session, tenant_id, *, account_name, group_name, owner_user_id=None):
+        from crm_mvp.models import Account, ProductGroup
+
+        account = Account(tenant_id=tenant_id, name=account_name)
+        db_session.add(account)
+        db_session.flush()
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        engagement.account_id = account.id
+        engagement.owner_user_id = owner_user_id
+        group = ProductGroup(tenant_id=tenant_id, name=group_name)
+        db_session.add(group)
+        db_session.flush()
+        product = make_product(db_session, tenant_id, product_group_id=group.id, name=group_name)
+        pr.add_line_item(
+            db_session, tenant_id, engagement, product=product,
+            quantity=1, discount_rate=Decimal("0"),
+        )
+        db_session.flush()
+        qt.create_quote_from_engagement(
+            db_session, tenant_id, engagement, valid_until=None, actor="human:ae-1",
+        )
+        db_session.flush()
+        return account, group
+
+    def test_filters_by_account_ids(self, db_session, tenant_id):
+        account_a, _ = self._make_quote_fact(
+            db_session, tenant_id, account_name="A社", group_name="グループA",
+        )
+        self._make_quote_fact(db_session, tenant_id, account_name="B社", group_name="グループB")
+        db_session.commit()
+
+        facts = qt.quote_document_facts(db_session, tenant_id)
+        filtered = qt.filter_documents(facts, account_ids={account_a.id})
+        assert len(filtered) == 1
+        assert filtered[0]["account"].id == account_a.id
+
+    def test_filters_by_product_group_ids(self, db_session, tenant_id):
+        _, group_a = self._make_quote_fact(
+            db_session, tenant_id, account_name="C社", group_name="グループC",
+        )
+        self._make_quote_fact(db_session, tenant_id, account_name="D社", group_name="グループD")
+        db_session.commit()
+
+        facts = qt.quote_document_facts(db_session, tenant_id)
+        filtered = qt.filter_documents(facts, product_group_ids={group_a.id})
+        assert len(filtered) == 1
+        assert group_a.id in filtered[0]["product_group_ids"]
+
+    def test_filters_by_owner_user_id(self, db_session, tenant_id):
+        from crm_mvp.models import User
+
+        owner = User(
+            tenant_id=tenant_id, name="担当X", email="fx@example.com",
+            function="Sales", role="AM",
+        )
+        db_session.add(owner)
+        db_session.flush()
+        self._make_quote_fact(
+            db_session, tenant_id, account_name="E社", group_name="グループE", owner_user_id=owner.id,
+        )
+        self._make_quote_fact(db_session, tenant_id, account_name="F社", group_name="グループF")
+        db_session.commit()
+
+        facts = qt.quote_document_facts(db_session, tenant_id)
+        filtered = qt.filter_documents(facts, owner_user_id=owner.id)
+        assert len(filtered) == 1
+        assert filtered[0]["owner_user"].id == owner.id

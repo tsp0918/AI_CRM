@@ -9,6 +9,7 @@ Quote/Contract は作成時点の EngagementLineItem(または元にした Quote
 from __future__ import annotations
 
 import uuid
+from collections import defaultdict
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
@@ -16,7 +17,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..enums import ContractStatus, QuoteStatus
-from ..models import Contract, ContractLineItem, Engagement, Quote, QuoteLineItem
+from ..models import (
+    Account, Contract, ContractLineItem, Engagement, Product, Quote,
+    QuoteLineItem, SalesGroup, User,
+)
 from .pricing import list_line_items
 
 
@@ -144,3 +148,138 @@ def list_contracts(
     if engagement_id is not None:
         stmt = stmt.where(Contract.engagement_id == engagement_id)
     return session.execute(stmt.order_by(Contract.created_at.desc())).scalars().all()
+
+
+# --- 見積・契約一覧の階層フィルタ基盤(2026-08-14) --------------------------
+#
+# revenue_report.py の line_item_facts と同じ設計思想。ただし1見積/1契約は
+# 複数商品を持ちうるため、fact行の粒度は「明細」ではなく「文書1件=1行」とし、
+# product_ids/product_group_ids を集合として持たせる(商品絞り込みは
+# 部分一致=メンバーシップ判定になる)。
+
+def _enrich_documents(
+    session: Session, tenant_id: uuid.UUID, documents: list, line_items: list, doc_id_attr: str,
+) -> list[dict]:
+    engagement_ids = {d.engagement_id for d in documents}
+    engagements = {
+        e.id: e for e in session.execute(
+            select(Engagement).where(Engagement.id.in_(engagement_ids))
+        ).scalars()
+    } if engagement_ids else {}
+
+    account_ids = {e.account_id for e in engagements.values()}
+    accounts = {
+        a.id: a for a in session.execute(
+            select(Account).where(Account.id.in_(account_ids))
+        ).scalars()
+    } if account_ids else {}
+
+    def walk_to_root(account: Account | None) -> Account | None:
+        if account is None:
+            return None
+        current = account
+        seen: set[uuid.UUID] = set()
+        while current.parent_account_id is not None and current.parent_account_id not in seen:
+            seen.add(current.id)
+            parent = accounts.get(current.parent_account_id)
+            if parent is None:
+                break
+            current = parent
+        return current
+
+    sales_group_ids = {e.sales_group_id for e in engagements.values() if e.sales_group_id}
+    sales_groups = {
+        g.id: g for g in session.execute(
+            select(SalesGroup).where(SalesGroup.id.in_(sales_group_ids))
+        ).scalars()
+    } if sales_group_ids else {}
+
+    owner_ids = {e.owner_user_id for e in engagements.values() if e.owner_user_id}
+    users = {
+        u.id: u for u in session.execute(
+            select(User).where(User.id.in_(owner_ids))
+        ).scalars()
+    } if owner_ids else {}
+
+    product_ids_by_doc: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
+    all_product_ids: set[uuid.UUID] = set()
+    for li in line_items:
+        if li.product_id:
+            product_ids_by_doc[getattr(li, doc_id_attr)].add(li.product_id)
+            all_product_ids.add(li.product_id)
+
+    products = {
+        p.id: p for p in session.execute(
+            select(Product).where(Product.id.in_(all_product_ids))
+        ).scalars()
+    } if all_product_ids else {}
+
+    facts = []
+    for doc in documents:
+        engagement = engagements.get(doc.engagement_id)
+        account = accounts.get(engagement.account_id) if engagement else None
+        product_ids = product_ids_by_doc.get(doc.id, set())
+        product_group_ids = {
+            products[pid].product_group_id for pid in product_ids
+            if products.get(pid) and products[pid].product_group_id
+        }
+        facts.append({
+            "document": doc, "engagement": engagement, "account": account,
+            "root_account": walk_to_root(account),
+            "sales_group": sales_groups.get(engagement.sales_group_id)
+            if engagement and engagement.sales_group_id else None,
+            "owner_user": users.get(engagement.owner_user_id)
+            if engagement and engagement.owner_user_id else None,
+            "product_ids": product_ids, "product_group_ids": product_group_ids,
+        })
+    return facts
+
+
+def quote_document_facts(session: Session, tenant_id: uuid.UUID) -> list[dict]:
+    quotes = list_quotes(session, tenant_id)
+    if not quotes:
+        return []
+    line_items = session.execute(
+        select(QuoteLineItem).where(
+            QuoteLineItem.tenant_id == tenant_id,
+            QuoteLineItem.quote_id.in_([q.id for q in quotes]),
+        )
+    ).scalars().all()
+    return _enrich_documents(session, tenant_id, quotes, line_items, "quote_id")
+
+
+def contract_document_facts(
+    session: Session, tenant_id: uuid.UUID, contracts: list[Contract] | None = None,
+) -> list[dict]:
+    """contracts を渡すとその集合だけをfact化する(契約更新画面がACTIVE+
+    期限内に絞り込んだ後で同じ基盤を再利用するため)。省略時はテナント全件。"""
+    if contracts is None:
+        contracts = list_contracts(session, tenant_id)
+    if not contracts:
+        return []
+    line_items = session.execute(
+        select(ContractLineItem).where(
+            ContractLineItem.tenant_id == tenant_id,
+            ContractLineItem.contract_id.in_([c.id for c in contracts]),
+        )
+    ).scalars().all()
+    return _enrich_documents(session, tenant_id, contracts, line_items, "contract_id")
+
+
+def filter_documents(
+    facts: list[dict], *, account_ids: set[uuid.UUID] | None = None,
+    product_group_ids: set[uuid.UUID] | None = None,
+    owner_user_id: uuid.UUID | None = None,
+) -> list[dict]:
+    """account_ids/product_group_ids は呼び出し側でロールアップ済みの集合
+    (get_family_account_ids/get_family_product_group_ids の結果)を渡す。"""
+    def matches(f: dict) -> bool:
+        if account_ids is not None and (not f["account"] or f["account"].id not in account_ids):
+            return False
+        if product_group_ids is not None and not (f["product_group_ids"] & product_group_ids):
+            return False
+        if owner_user_id is not None and (not f["owner_user"] or f["owner_user"].id != owner_user_id):
+            return False
+        return True
+
+    return [f for f in facts if matches(f)]

@@ -6,53 +6,131 @@
 <h1>見積・契約</h1>
 <p class="subtitle">全案件を横断した見積もり・契約の一覧です。作成・ステータス変更は各案件の詳細画面から行います。</p>
 
-<div class="card">
-  <h2>見積もり({{ quotes | length }}件)</h2>
-  {% if quotes %}
-  <table>
-    <thead><tr><th>番号</th><th>案件</th><th>状態</th><th>金額</th><th>作成日</th><th>有効期限</th></tr></thead>
-    <tbody>
-      {% for q in quotes %}
-      {% set engagement = engagements.get(q.engagement_id) %}
-      <tr>
-        <td class="mono">{{ q.quote_number }}</td>
-        <td>{% if engagement %}<a href="/ui/engagements/{{ engagement.id }}">{{ engagement.name }}</a>{% else %}—{% endif %}</td>
-        <td>{{ q.status }}</td>
-        <td class="mono">{{ "{:,.0f}".format(q.total_amount) }} {{ q.currency }}</td>
-        <td class="mono" style="font-size:11px;">{{ q.created_at.strftime("%Y-%m-%d") }}</td>
-        <td>{{ q.valid_until or "—" }}</td>
-      </tr>
+<div class="facet-layout">
+  <aside class="facet-rail">
+    <div class="facet-tabs">
+      {% for key, label in dim_choices %}
+      <a href="/ui/quotes?dim={{ key }}" class="{% if dim == key %}active{% endif %}">{{ label }}</a>
       {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <div class="empty-state">まだ見積もりがありません。</div>
-  {% endif %}
-</div>
+    </div>
+    <a href="/ui/quotes" class="facet-link {% if not dim %}active{% endif %}">
+      全体 <span class="facet-count">{{ total_quote_count + total_contract_count }}</span>
+    </a>
 
-<div class="card">
-  <h2>契約({{ contracts | length }}件)</h2>
-  {% if contracts %}
-  <table>
-    <thead><tr><th>番号</th><th>案件</th><th>状態</th><th>金額</th><th>作成日</th><th>契約期間</th></tr></thead>
-    <tbody>
-      {% for c in contracts %}
-      {% set engagement = engagements.get(c.engagement_id) %}
-      <tr>
-        <td class="mono">{{ c.contract_number }}</td>
-        <td>{% if engagement %}<a href="/ui/engagements/{{ engagement.id }}">{{ engagement.name }}</a>{% else %}—{% endif %}</td>
-        <td>{{ c.status }}</td>
-        <td class="mono">{{ "{:,.0f}".format(c.total_amount) }} {{ c.currency }}</td>
-        <td class="mono" style="font-size:11px;">{{ c.created_at.strftime("%Y-%m-%d") }}</td>
-        <td>
-          {% if c.start_date or c.end_date %}{{ c.start_date or "—" }} 〜 {{ c.end_date or "—" }}{% else %}—{% endif %}
-        </td>
-      </tr>
+    {% if dim == "owner" %}
+      {% for row in owner_rail %}
+      <a href="/ui/quotes?dim=owner&owner_user_id={{ row.user.id }}"
+         class="facet-link {% if owner_user_id == row.user.id|string %}active{% endif %}">
+        {{ row.user.name }} <span class="facet-count">{{ row.count }}</span>
+      </a>
       {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <div class="empty-state">まだ契約がありません。</div>
-  {% endif %}
+    {% elif dim == "product" %}
+      {% for row in product_rail %}
+      <div class="facet-tree">
+        <a href="/ui/quotes?dim=product&product_group_id={{ row.group.id }}"
+           class="facet-link {% if product_group_id == row.group.id|string %}active{% endif %}">
+          {{ row.group.name }} <span class="facet-count">{{ row.count }}</span>
+        </a>
+        {% if row.children %}
+        <details {% if product_group_id in row.children | map(attribute="group.id") | map("string") | list %}open{% endif %}>
+          <summary style="cursor:pointer; font-size:11px; color:#9ca3af; padding:2px 10px;">子グループ({{ row.children | length }})</summary>
+          {% for child in row.children %}
+          <a href="/ui/quotes?dim=product&product_group_id={{ child.group.id }}"
+             class="facet-link {% if product_group_id == child.group.id|string %}active{% endif %}">
+            {{ child.group.name }} <span class="facet-count">{{ child.count }}</span>
+          </a>
+          {% endfor %}
+        </details>
+        {% endif %}
+      </div>
+      {% endfor %}
+    {% elif dim == "account" %}
+      {% for row in account_rail %}
+      <div class="facet-tree">
+        <a href="/ui/quotes?dim=account&account_id={{ row.account.id }}"
+           class="facet-link {% if account_id == row.account.id|string %}active{% endif %}">
+          {{ row.account.name }} <span class="facet-count">{{ row.count }}</span>
+        </a>
+        {% if row.children %}
+        <details {% if account_id in row.children | map(attribute="account.id") | map("string") | list %}open{% endif %}>
+          <summary style="cursor:pointer; font-size:11px; color:#9ca3af; padding:2px 10px;">子取引先({{ row.children | length }})</summary>
+          {% for child in row.children %}
+          <a href="/ui/quotes?dim=account&account_id={{ child.account.id }}"
+             class="facet-link {% if account_id == child.account.id|string %}active{% endif %}">
+            {{ child.account.name }} <span class="facet-count">{{ child.count }}</span>
+          </a>
+          {% endfor %}
+        </details>
+        {% endif %}
+      </div>
+      {% endfor %}
+    {% endif %}
+  </aside>
+
+  <div class="facet-main">
+    <div class="card">
+      <h2>見積もり({{ filtered_quote_count }}件)</h2>
+      {% if quotes_by_status %}
+        {% for status, facts in quotes_by_status %}
+        <div class="status-section">
+          <div class="status-section-label">
+            <span class="badge {{ quote_status_badge.get(status, '') }}">{{ quote_status_labels.get(status, status) }}</span>
+            ({{ facts | length }})
+          </div>
+          <table>
+            <thead><tr><th>番号</th><th>案件</th><th>取引先</th><th>金額</th><th>作成日</th><th>有効期限</th></tr></thead>
+            <tbody>
+              {% for f in facts %}
+              <tr>
+                <td class="mono">{{ f.document.quote_number }}</td>
+                <td>{% if f.engagement %}<a href="/ui/engagements/{{ f.engagement.id }}">{{ f.engagement.name }}</a>{% else %}—{% endif %}</td>
+                <td>{{ f.account.name if f.account else "—" }}</td>
+                <td class="mono">{{ "{:,.0f}".format(f.document.total_amount) }} {{ f.document.currency }}</td>
+                <td class="mono" style="font-size:11px;">{{ f.document.created_at.strftime("%Y-%m-%d") }}</td>
+                <td>{{ f.document.valid_until or "—" }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endfor %}
+      {% else %}
+      <div class="empty-state">該当する見積もりがありません。</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>契約({{ filtered_contract_count }}件)</h2>
+      {% if contracts_by_status %}
+        {% for status, facts in contracts_by_status %}
+        <div class="status-section">
+          <div class="status-section-label">
+            <span class="badge {{ contract_status_badge.get(status, '') }}">{{ contract_status_labels.get(status, status) }}</span>
+            ({{ facts | length }})
+          </div>
+          <table>
+            <thead><tr><th>番号</th><th>案件</th><th>取引先</th><th>金額</th><th>作成日</th><th>契約期間</th></tr></thead>
+            <tbody>
+              {% for f in facts %}
+              <tr>
+                <td class="mono">{{ f.document.contract_number }}</td>
+                <td>{% if f.engagement %}<a href="/ui/engagements/{{ f.engagement.id }}">{{ f.engagement.name }}</a>{% else %}—{% endif %}</td>
+                <td>{{ f.account.name if f.account else "—" }}</td>
+                <td class="mono">{{ "{:,.0f}".format(f.document.total_amount) }} {{ f.document.currency }}</td>
+                <td class="mono" style="font-size:11px;">{{ f.document.created_at.strftime("%Y-%m-%d") }}</td>
+                <td>
+                  {% if f.document.start_date or f.document.end_date %}{{ f.document.start_date or "—" }} 〜 {{ f.document.end_date or "—" }}{% else %}—{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endfor %}
+      {% else %}
+      <div class="empty-state">該当する契約がありません。</div>
+      {% endif %}
+    </div>
+  </div>
 </div>
 {% endblock %}

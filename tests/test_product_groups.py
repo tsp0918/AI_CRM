@@ -72,3 +72,26 @@ class TestListProductGroupsTreeOrdered:
         ordered = pg.list_product_groups_tree_ordered(db_session, tenant_id)
         names = [g.name for g in ordered]
         assert names == ["検査装置", "オプション", "標準機", "消耗品"]
+
+
+class TestGetFamilyProductGroupIds:
+    def test_includes_self_and_children(self, db_session, tenant_id):
+        parent = pg.create_product_group(db_session, tenant_id, name="検査装置")
+        child = pg.create_product_group(
+            db_session, tenant_id, name="標準機", parent_group_id=parent.id,
+        )
+        other = pg.create_product_group(db_session, tenant_id, name="消耗品")
+        db_session.commit()
+
+        family = pg.get_family_product_group_ids(db_session, tenant_id, parent.id)
+        assert family == {parent.id, child.id}
+        assert other.id not in family
+
+    def test_leaf_group_returns_only_itself(self, db_session, tenant_id):
+        parent = pg.create_product_group(db_session, tenant_id, name="検査装置")
+        child = pg.create_product_group(
+            db_session, tenant_id, name="標準機", parent_group_id=parent.id,
+        )
+        db_session.commit()
+
+        assert pg.get_family_product_group_ids(db_session, tenant_id, child.id) == {child.id}
