@@ -57,6 +57,39 @@ class TestAccountsUi:
         assert resp.status_code == 200
         assert "鈴木一郎" in resp.text
 
+    def test_account_detail_shows_revenue_by_product(self, ui_client, db_session, tenant_id):
+        account, eng = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
+        product = Product(
+            tenant_id=tenant_id, name="ドリルダウン商品", list_price=Decimal("100000"), currency="JPY",
+        )
+        db_session.add(product)
+        db_session.flush()
+        add_line_item(db_session, tenant_id, eng, product=product, quantity=1, discount_rate=Decimal("0"))
+        db_session.commit()
+
+        resp = ui_client.get(f"/ui/accounts/{account.id}")
+        assert resp.status_code == 200
+        assert "ドリルダウン商品" in resp.text
+        assert "100,000" in resp.text
+
+    def test_account_detail_rolls_up_children_revenue(self, ui_client, db_session, tenant_id):
+        parent_account = Account(tenant_id=tenant_id, name="親会社")
+        db_session.add(parent_account)
+        db_session.flush()
+        child_account, eng = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
+        child_account.parent_account_id = parent_account.id
+        product = Product(
+            tenant_id=tenant_id, name="子会社経由商品", list_price=Decimal("50000"), currency="JPY",
+        )
+        db_session.add(product)
+        db_session.flush()
+        add_line_item(db_session, tenant_id, eng, product=product, quantity=1, discount_rate=Decimal("0"))
+        db_session.commit()
+
+        resp = ui_client.get(f"/ui/accounts/{parent_account.id}")
+        assert resp.status_code == 200
+        assert "子会社経由商品" in resp.text
+
 
 class TestLeadAccountMatching:
     def test_set_matched_account(self, ui_client, db_session, tenant_id):
@@ -167,4 +200,70 @@ class TestRevenueReportUi:
 
     def test_report_renders_with_no_data(self, ui_client):
         resp = ui_client.get("/ui/reports/revenue")
+        assert resp.status_code == 200
+
+    def test_report_links_to_drilldown_and_account(self, ui_client, db_session, tenant_id):
+        account, eng = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
+        product_group = db_session.query(SalesGroup).filter_by(tenant_id=tenant_id).first()
+        product = Product(
+            tenant_id=tenant_id, name="テスト商品", list_price=Decimal("100000"), currency="JPY",
+        )
+        db_session.add(product)
+        db_session.flush()
+        add_line_item(db_session, tenant_id, eng, product=product, quantity=1, discount_rate=Decimal("0"))
+        db_session.commit()
+
+        resp = ui_client.get("/ui/reports/revenue")
+        assert resp.status_code == 200
+        assert "/ui/reports/revenue/drill-down?relationship_type=" in resp.text
+        assert f"/ui/accounts/{account.id}" in resp.text
+
+
+class TestRevenueDrilldownUi:
+    def _seed_closed_won_deal(self, db_session, tenant_id, *, product_name="ドリル商品"):
+        account, eng = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
+        product = Product(
+            tenant_id=tenant_id, name=product_name, list_price=Decimal("100000"), currency="JPY",
+        )
+        db_session.add(product)
+        db_session.flush()
+        add_line_item(db_session, tenant_id, eng, product=product, quantity=1, discount_rate=Decimal("0"))
+        db_session.commit()
+        return account, eng
+
+    def test_drilldown_renders_with_no_filter(self, ui_client, db_session, tenant_id):
+        account, eng = self._seed_closed_won_deal(db_session, tenant_id)
+
+        resp = ui_client.get("/ui/reports/revenue/drill-down")
+        assert resp.status_code == 200
+        assert "ドリル商品" in resp.text
+        assert eng.name in resp.text
+        assert account.name in resp.text
+
+    def test_drilldown_filters_by_relationship_type(self, ui_client, db_session, tenant_id):
+        self._seed_closed_won_deal(db_session, tenant_id, product_name="新規商品")
+
+        resp = ui_client.get("/ui/reports/revenue/drill-down?relationship_type=new_business")
+        assert resp.status_code == 200
+        assert "新規商品" in resp.text
+
+        resp_renewal = ui_client.get("/ui/reports/revenue/drill-down?relationship_type=renewal")
+        assert resp_renewal.status_code == 200
+        assert "該当する商談がありません" in resp_renewal.text
+
+    def test_drilldown_filters_by_sales_group(self, ui_client, db_session, tenant_id):
+        _, eng = self._seed_closed_won_deal(db_session, tenant_id, product_name="グループ限定商品")
+        group = SalesGroup(tenant_id=tenant_id, name="ドリルダウングループ")
+        db_session.add(group)
+        db_session.flush()
+        eng.sales_group_id = group.id
+        db_session.commit()
+
+        resp = ui_client.get(f"/ui/reports/revenue/drill-down?sales_group_id={group.id}")
+        assert resp.status_code == 200
+        assert "グループ限定商品" in resp.text
+        assert "ドリルダウングループ" in resp.text
+
+    def test_drilldown_renders_with_no_data(self, ui_client):
+        resp = ui_client.get("/ui/reports/revenue/drill-down")
         assert resp.status_code == 200

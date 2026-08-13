@@ -17,9 +17,10 @@ from sqlalchemy.orm import Session
 
 from ...models import Account
 from ...services.account_hierarchy import (
-    create_grouping_account, list_accounts_tree_ordered,
+    create_grouping_account, get_family_account_ids, list_accounts_tree_ordered,
     list_engagements_for_account, list_leads_for_account, set_parent_account,
 )
+from ...services.revenue_report import aggregate_by, line_item_facts
 from .common import base_context, redirect_with_flash
 from .leads import LEAD_STATUS_LABELS
 from .session import UiSession, get_ui_db_session, require_ui_session
@@ -111,6 +112,16 @@ def account_detail(
     engagements = list_engagements_for_account(session, ui_session.tenant_id, account.id)
     leads = list_leads_for_account(session, ui_session.tenant_id, account.id)
 
+    # 商品別売上内訳(2026-08-14): この取引先が法人グループの親であれば
+    # 子孫アカウント分も合算する — 売上レポートの「取引先(法人グループ)別」
+    # から遷移してきたときに、傘下企業を含めた実績と一致させるため。
+    family_ids = get_family_account_ids(session, ui_session.tenant_id, account.id)
+    facts = line_item_facts(session, ui_session.tenant_id)
+    account_facts = [f for f in facts if f["account"] and f["account"].id in family_ids]
+    revenue_by_product = aggregate_by(
+        account_facts, lambda f: f["product"].name if f["product"] else "未分類",
+    )
+
     context = base_context(
         session, ui_session, active_nav="accounts", flash=flash, flash_type=flash_type,
     )
@@ -118,5 +129,6 @@ def account_detail(
         "account": account, "parent": parent, "children": children,
         "engagements": engagements, "leads": leads,
         "lead_status_labels": LEAD_STATUS_LABELS,
+        "revenue_by_product": revenue_by_product,
     })
     return templates.TemplateResponse(request, "account_detail.html", context)

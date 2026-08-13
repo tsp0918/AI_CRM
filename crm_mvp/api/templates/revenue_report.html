@@ -6,7 +6,7 @@
 <h1>売上レポート</h1>
 <p class="subtitle">
   受注(closed_won)した商談を対象に、契約が発行されていれば契約金額(将来はERPと同期した実売上額)、
-  無ければ案件金額を実売上として集計しています。
+  無ければ案件金額を実売上として集計しています。行をクリックすると内訳・該当商談まで辿れます。
 </p>
 
 <div class="card">
@@ -26,7 +26,11 @@
       <tbody>
         {% for row in by_product_group %}
         <tr>
-          <td>{{ row.label }}</td>
+          <td>
+            {% if row.id %}
+            <a href="/ui/reports/revenue/drill-down?product_group_id={{ row.id }}">{{ row.label }}</a>
+            {% else %}{{ row.label }}{% endif %}
+          </td>
           <td class="mono">{{ "{:,.0f}".format(row.amount) }}</td>
           <td class="mono">{{ row.count }}</td>
         </tr>
@@ -40,13 +44,18 @@
 
   <div class="card">
     <h2>取引先(法人グループ)別</h2>
+    <p class="subtitle" style="margin-bottom:8px;">クリックすると取引先詳細(商品別内訳・商談履歴)に遷移します。</p>
     {% if by_account %}
     <table>
       <thead><tr><th>取引先</th><th>金額</th><th>商談数</th></tr></thead>
       <tbody>
         {% for row in by_account %}
         <tr>
-          <td>{{ row.label }}</td>
+          <td>
+            {% if row.id %}
+            <a href="/ui/accounts/{{ row.id }}">{{ row.label }}</a>
+            {% else %}{{ row.label }}{% endif %}
+          </td>
           <td class="mono">{{ "{:,.0f}".format(row.amount) }}</td>
           <td class="mono">{{ row.count }}</td>
         </tr>
@@ -68,7 +77,11 @@
       <tbody>
         {% for row in by_sales_group %}
         <tr>
-          <td>{{ row.label }}</td>
+          <td>
+            {% if row.id %}
+            <a href="/ui/reports/revenue/drill-down?sales_group_id={{ row.id }}">{{ row.label }}</a>
+            {% else %}{{ row.label }}{% endif %}
+          </td>
           <td class="mono">{{ "{:,.0f}".format(row.amount) }}</td>
           <td class="mono">{{ row.count }}</td>
         </tr>
@@ -88,7 +101,11 @@
       <tbody>
         {% for row in by_relationship %}
         <tr>
-          <td>{{ row.label }}</td>
+          <td>
+            {% if row.id %}
+            <a href="/ui/reports/revenue/drill-down?relationship_type={{ row.id }}">{{ row.label }}</a>
+            {% else %}{{ row.label }}{% endif %}
+          </td>
           <td class="mono">{{ "{:,.0f}".format(row.amount) }}</td>
           <td class="mono">{{ row.count }}</td>
         </tr>

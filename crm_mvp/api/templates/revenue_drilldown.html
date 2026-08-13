@@ -1,0 +1,62 @@
+{% extends "_base.html" %}
+
+{% block title %}売上ドリルダウン | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<p><a href="/ui/reports/revenue">&larr; 売上レポートに戻る</a></p>
+<h1>売上ドリルダウン</h1>
+<p class="subtitle">
+  {% if filter_labels %}
+    {% for label, value in filter_labels %}{{ label }}: <strong>{{ value }}</strong>{% if not loop.last %} / {% endif %}{% endfor %}
+  {% else %}
+    絞り込み条件なし(すべての受注商談)
+  {% endif %}
+</p>
+
+<div class="card">
+  <h2>該当する実売上</h2>
+  <div style="font-size:28px; font-weight:800; font-family:ui-monospace,monospace;">
+    {{ "{:,.0f}".format(total_revenue) }} JPY
+  </div>
+</div>
+
+<div class="card">
+  <h2>商品別内訳</h2>
+  {% if by_product %}
+  <table>
+    <thead><tr><th>商品</th><th>金額</th><th>明細数</th></tr></thead>
+    <tbody>
+      {% for row in by_product %}
+      <tr>
+        <td>{{ row.label }}</td>
+        <td class="mono">{{ "{:,.0f}".format(row.amount) }}</td>
+        <td class="mono">{{ row.count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">データがありません。</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>該当する商談({{ deals | length }}件)</h2>
+  {% if deals %}
+  <table>
+    <thead><tr><th>商談名</th><th>取引先</th><th>金額(この絞り込みに該当する分)</th></tr></thead>
+    <tbody>
+      {% for row in deals %}
+      <tr>
+        <td><a href="/ui/engagements/{{ row.engagement.id }}">{{ row.engagement.name }}</a></td>
+        <td>{{ row.account.name if row.account else "—" }}</td>
+        <td class="mono">{{ "{:,.0f}".format(row.amount) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">該当する商談がありません。</div>
+  {% endif %}
+</div>
+{% endblock %}

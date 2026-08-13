@@ -23,6 +23,29 @@
 {% endif %}
 
 <div class="card">
+  <h2>商品別売上内訳</h2>
+  <p class="subtitle" style="margin-bottom:12px;">
+    {% if children %}子取引先を含む法人グループ全体の実績です。{% else %}受注(closed_won)商談の商品明細を集計しています。{% endif %}
+  </p>
+  {% if revenue_by_product %}
+  <table>
+    <thead><tr><th>商品</th><th>金額</th><th>明細数</th></tr></thead>
+    <tbody>
+      {% for row in revenue_by_product %}
+      <tr>
+        <td>{{ row.label }}</td>
+        <td class="mono">{{ "{:,.0f}".format(row.amount) }}</td>
+        <td class="mono">{{ row.count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">受注実績がまだありません。</div>
+  {% endif %}
+</div>
+
+<div class="card">
   <h2>商談履歴({{ engagements | length }}件)</h2>
   <p class="subtitle" style="margin-bottom:12px;">
     継続/Upsell/Cross-sellの親子リンクの有無を問わず、この取引先に紐づく商談をすべて表示します。

@@ -19,14 +19,16 @@ scripts/seed_demo_material_deals.py(商品ライン別)で作った仮のセー�
     ├─ 既存顧客(AM)
     └─ カスタマーサクセス(CS)
 
-商談の再割当ルール:
-  - relationship_type が renewal/upsell/cross_sell → カスタマーサクセス
-    (契約後のリテンション・拡張はCSが持つ、という一般的な体制を反映)
-  - lead/prospect段階 → 新規開拓(BDM。まだ商談化前後の見極め段階)
-    (closed_lostで金額が未確定のものもここに含める)
-    (Authorityは今回は承認ゲートには使わず、データとして保持するのみ)
-  - 金額 5,000万円以上 → 大手顧客(KAM)
-  - それ以外 → 既存顧客(AM)
+商談の再割当ルール(2026-08-14 ユーザー訂正 — 役割の実態に合わせた):
+  - BDM = 新規ロゴ獲得担当 → relationship_type が無い(新規)商談はすべて
+    新規開拓(BDM)。ステージや金額の大小では判定しない。
+  - AM = 既存顧客担当の営業 → Upsell/Cross-sell(既存顧客への追加販売)
+    はすべて既存顧客(AM)。
+  - CS = 既存顧客の契約更新管理 → Renewal(契約更新)はすべて
+    カスタマーサクセス(CS)。
+  大手顧客(KAM)は組織・ユーザーとしては残すが、この自動割当ルールの
+  対象外(今回は判定基準が無いため商談は自動では割り当てない)。
+  Authorityは今回は承認ゲートには使わず、データとして保持するのみ。
 
 先に scripts/seed_demo_pipeline.py・scripts/seed_demo_2yr_backfill.py・
 scripts/seed_demo_material_deals.py を実行しておくこと(商談データが必要)。
@@ -42,7 +44,6 @@ import csv
 import itertools
 import os
 import uuid
-from decimal import Decimal
 from pathlib import Path
 
 from sqlalchemy import create_engine, select, text
@@ -58,8 +59,6 @@ DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-0000000000aa")
 DEFAULT_CSV_PATH = Path(__file__).parent / "data" / "user_matrix_CRM.csv"
 
 TENANT_ID = DEFAULT_TENANT_ID
-
-KEY_ACCOUNT_THRESHOLD = Decimal("50000000")
 
 # CSVの Function + Role から、どのセールスグループに属するかへのマッピング。
 # (Function, Role) -> グループキー。キーは seed_sales_group_hierarchy が
@@ -158,7 +157,6 @@ def reassign_engagements(
     session: Session, group_ids: dict[str, uuid.UUID], users_by_group: dict[str, list[User]],
 ) -> int:
     bdm_cycle = itertools.cycle(users_by_group.get("new_business", [None]))
-    kam_cycle = itertools.cycle(users_by_group.get("key_accounts", [None]))
     am_cycle = itertools.cycle(users_by_group.get("account_management", [None]))
     cs_cycle = itertools.cycle(users_by_group.get("customer_success", [None]))
 
@@ -169,13 +167,15 @@ def reassign_engagements(
 
     count = 0
     for e in engagements:
-        if e.relationship_type in ("renewal", "upsell", "cross_sell"):
+        # 2026-08-14 ユーザー訂正: BDMは新規ロゴ獲得、AMは既存顧客の
+        # Upsell/Cross-sell、CSは既存顧客の契約更新管理を担当する。
+        # 案件のステージや金額の大小ではなく、relationship_typeという
+        # 「その商談の性質」だけで一意に決まる — KAM(大手顧客)は今回の
+        # 自動割当ルールの対象外(既存ユーザー・グループとしては残すが、
+        # 自動では商談が割り当たらない)。
+        if e.relationship_type == "renewal":
             group_key, user = "customer_success", next(cs_cycle)
-        elif e.stage in ("lead", "prospect"):
-            group_key, user = "new_business", next(bdm_cycle)
-        elif (e.amount or Decimal("0")) >= KEY_ACCOUNT_THRESHOLD:
-            group_key, user = "key_accounts", next(kam_cycle)
-        elif (e.amount or Decimal("0")) > Decimal("0"):
+        elif e.relationship_type in ("upsell", "cross_sell"):
             group_key, user = "account_management", next(am_cycle)
         else:
             group_key, user = "new_business", next(bdm_cycle)
