@@ -7,7 +7,9 @@ Leadへの登録・ドラフトのレビューは leads.py 側の画面から行
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -15,9 +17,11 @@ from sqlalchemy.orm import Session
 from ...enums import SequenceEnrollmentStatus, SequenceStepChannel, TouchChannel
 from ...models import Sequence, SequenceEnrollment, SequenceStep
 from ...services.lead_scoring import HIGH_INTENT_CHANNELS
-from ...services.sequences import SEQUENCE_END, create_sequence, generate_due_drafts
+from ...services.sequences import (
+    SEQUENCE_END, create_sequence, generate_due_drafts, sequence_funnel,
+)
 from .common import base_context, redirect_with_flash
-from .leads import TOUCH_CHANNEL_LABELS
+from .leads import LEAD_STATUS_LABELS, TOUCH_CHANNEL_LABELS
 from .session import UiSession, get_ui_db_session, require_ui_session
 from .templates import templates
 
@@ -132,3 +136,25 @@ def generate_due_ui(
     drafts = generate_due_drafts(session, ui_session.tenant_id)
     session.commit()
     return redirect_with_flash("/ui/sequences", f"{len(drafts)}件のドラフトを生成しました")
+
+
+@router.get("/ui/sequences/{sequence_id}", response_class=HTMLResponse)
+def sequence_detail(
+    request: Request,
+    sequence_id: uuid.UUID,
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> HTMLResponse:
+    sequence = session.get(Sequence, sequence_id)
+    if sequence is None or sequence.tenant_id != ui_session.tenant_id:
+        raise HTTPException(status_code=404, detail="sequence not found")
+
+    funnel = sequence_funnel(session, ui_session.tenant_id, sequence_id)
+
+    context = base_context(session, ui_session, active_nav="sequences")
+    context.update({
+        "sequence": sequence, "funnel": funnel,
+        "step_channel_labels": STEP_CHANNEL_LABELS,
+        "lead_status_labels": LEAD_STATUS_LABELS,
+    })
+    return templates.TemplateResponse(request, "sequence_detail.html", context)

@@ -9,6 +9,7 @@
   {{ lead.company_name }}{% if lead.title %} / {{ lead.title }}{% endif %} /
   {{ lead_status_labels.get(lead.status, lead.status) }}
   {% if lead.source_channel %} / {{ source_channel_labels.get(lead.source_channel, lead.source_channel) }}{% endif %}
+  {% if campaign %} / <a href="/ui/campaigns">{{ campaign.name }}</a>{% endif %}
 </p>
 
 <!-- スコア -->

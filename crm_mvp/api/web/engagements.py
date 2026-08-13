@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 
 from ...enums import Confidence, Criterion, ProposalStatus, Stage, VerificationMethod
 from ...models import (
-    Account, ActionItem, Engagement, ExtractionProposal, GraphNode,
-    IngestionSource, QualificationSlot, Waiver,
+    Account, ActionItem, Campaign, Engagement, ExtractionProposal, GraphNode,
+    IngestionSource, Lead, QualificationSlot, Waiver,
 )
 from ...services.action_items import (
     assign_action_item, complete_action_item, dismiss_action_item,
@@ -27,6 +27,7 @@ from ...services.stage_transitions import (
     next_stage,
 )
 from .common import CRITERION_LABELS, base_context, redirect_with_flash
+from .leads import SOURCE_CHANNEL_LABELS, TOUCH_CHANNEL_LABELS
 from .session import UiSession, get_ui_db_session, require_ui_session
 from .templates import templates
 
@@ -158,6 +159,13 @@ def engagement_detail(
 
     open_actions = list_open_action_items(session, ui_session.tenant_id, engagement.id)
 
+    originating_lead = None
+    originating_campaign = None
+    if engagement.originating_lead_id:
+        originating_lead = session.get(Lead, engagement.originating_lead_id)
+        if originating_lead and originating_lead.source_campaign_id:
+            originating_campaign = session.get(Campaign, originating_lead.source_campaign_id)
+
     context = base_context(
         session, ui_session, active_nav="dashboard", flash=flash, flash_type=flash_type,
     )
@@ -173,6 +181,9 @@ def engagement_detail(
         "recent_activity": recent_activity,
         "score": score, "score_reasons": reasons,
         "open_actions": open_actions,
+        "originating_lead": originating_lead, "originating_campaign": originating_campaign,
+        "source_channel_labels": SOURCE_CHANNEL_LABELS,
+        "touch_channel_labels": TOUCH_CHANNEL_LABELS,
     })
     return templates.TemplateResponse(request, "engagement_detail.html", context)
 
@@ -204,11 +215,17 @@ def transition_stage_ui(
     engagement_id: uuid.UUID,
     to_stage: str = Form(...),
     waiver_id: str = Form(""),
+    lost_reason: str = Form(""),
     ui_session: UiSession = Depends(require_ui_session),
     session: Session = Depends(get_ui_db_session),
 ) -> RedirectResponse:
     engagement = _get_engagement_or_404(session, ui_session, engagement_id)
     wid = uuid.UUID(waiver_id) if waiver_id else None
+
+    if to_stage == Stage.CLOSED_LOST.value and not lost_reason.strip():
+        return redirect_with_flash(
+            f"/ui/engagements/{engagement_id}", "失注理由を入力してください", "error",
+        )
 
     try:
         outcome = apply_stage_transition(
@@ -227,6 +244,9 @@ def transition_stage_ui(
             f"/ui/engagements/{engagement_id}",
             "ゲートがこの遷移をブロックしています。Waiver を発行してください。", "error",
         )
+
+    if to_stage == Stage.CLOSED_LOST.value:
+        engagement.lost_reason = lost_reason.strip()
 
     session.commit()
     return redirect_with_flash(

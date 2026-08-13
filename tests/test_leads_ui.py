@@ -167,3 +167,38 @@ class TestDisqualifyLead:
         assert "flash_type=error" in resp.headers["location"]
         db_session.refresh(lead)
         assert lead.status != "disqualified"
+
+
+class TestEngagementLeadSummary:
+    def test_engagement_detail_shows_lead_summary_after_conversion(
+        self, ui_client, db_session, tenant_id,
+    ):
+        from crm_mvp.enums import LeadStatus, TouchChannel
+
+        lead = make_lead(db_session, tenant_id, status=LeadStatus.SQL)
+        db_session.commit()
+
+        ui_client.post(
+            f"/ui/leads/{lead.id}/touches",
+            data={"channel": "content_download", "note": "資料DL"},
+        )
+        resp = ui_client.post(f"/ui/leads/{lead.id}/convert", follow_redirects=False)
+        assert resp.status_code == 303
+        engagement_url = resp.headers["location"]
+
+        detail_resp = ui_client.get(engagement_url)
+        assert detail_resp.status_code == 200
+        assert "Lead発生経緯" in detail_resp.text
+        assert lead.full_name in detail_resp.text
+        assert "案件化時点の温度" in detail_resp.text
+
+    def test_no_lead_summary_for_directly_created_engagement(
+        self, ui_client, db_session, tenant_id,
+    ):
+        from .conftest import create_account_and_engagement
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        resp = ui_client.get(f"/ui/engagements/{engagement.id}")
+        assert resp.status_code == 200
+        assert "Lead発生経緯" not in resp.text

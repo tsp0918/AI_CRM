@@ -311,3 +311,39 @@ class TestReviewAndDismiss:
         db_session.commit()
 
         assert draft.status == SequenceDraftStatus.DISMISSED
+
+
+class TestSequenceFunnel:
+    def test_computes_reach_percentage_per_step(self, db_session, tenant_id):
+        sequence = sq.create_sequence(
+            db_session, tenant_id, name="S", description=None,
+            steps=DEMO_STEPS, actor="human:m",
+        )
+        lead_a = make_lead(db_session, tenant_id, full_name="A")
+        lead_b = make_lead(db_session, tenant_id, full_name="B")
+
+        sq.enroll_lead(db_session, tenant_id, lead_a, sequence, actor="human:m", now=NOW)
+        sq.enroll_lead(db_session, tenant_id, lead_b, sequence, actor="human:m", now=NOW)
+        db_session.flush()
+
+        sq.generate_due_drafts(db_session, tenant_id, now=NOW)  # 両方ともstep0到達
+        sq.generate_due_drafts(db_session, tenant_id, now=NOW + timedelta(days=3))  # 両方ともstep1到達
+        db_session.commit()
+
+        funnel = sq.sequence_funnel(db_session, tenant_id, sequence.id)
+        assert funnel["total_enrolled"] == 2
+        assert funnel["steps"][0]["reached_count"] == 2
+        assert funnel["steps"][0]["reached_pct"] == 100
+        assert funnel["steps"][1]["reached_count"] == 2
+        assert funnel["steps"][2]["reached_count"] == 0
+        assert funnel["steps"][2]["reached_pct"] == 0
+        assert len(funnel["steps"][0]["entries"]) == 2
+
+    def test_empty_sequence_has_zero_percent_not_division_error(self, db_session, tenant_id):
+        sequence = sq.create_sequence(
+            db_session, tenant_id, name="空S", description=None,
+            steps=DEMO_STEPS, actor="human:m",
+        )
+        funnel = sq.sequence_funnel(db_session, tenant_id, sequence.id)
+        assert funnel["total_enrolled"] == 0
+        assert all(s["reached_pct"] == 0 for s in funnel["steps"])

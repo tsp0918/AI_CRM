@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from ..enums import AccessLevel, LeadStatus, Stage, Stance, TouchChannel
 from ..models import Account, Engagement, Lead, Touch
 from .contacts import register_contact_and_link
-from .lead_scoring import LeadScore
+from .lead_scoring import LeadScore, compute_lead_score
 
 MQL_SCORE_THRESHOLD = 50
 
@@ -64,20 +64,51 @@ def disqualify_lead(session: Session, lead: Lead, *, reason: str) -> Lead:
     return lead
 
 
+def _build_conversion_snapshot(lead: Lead, touches: list[Touch], score: LeadScore) -> dict:
+    channel_counts: dict[str, int] = {}
+    for t in touches:
+        channel_counts[t.channel] = channel_counts.get(t.channel, 0) + 1
+
+    days_as_lead = None
+    if lead.created_at:
+        days_as_lead = (datetime.now(timezone.utc) - lead.created_at).days
+
+    return {
+        "company_score": score.company_score,
+        "person_score": score.person_score,
+        "quadrant": score.quadrant,
+        "company_reasons": score.company_reasons,
+        "person_reasons": score.person_reasons,
+        "touch_count": len(touches),
+        "touch_channel_counts": channel_counts,
+        "source_channel": lead.source_channel,
+        "source_campaign_id": str(lead.source_campaign_id) if lead.source_campaign_id else None,
+        "lead_status_before_conversion": lead.status,
+        "days_as_lead": days_as_lead,
+    }
+
+
 def convert_lead(
     session: Session, tenant_id: uuid.UUID, lead: Lead, *, actor: str,
 ) -> Engagement:
     """Lead → Account(既存 or 新規)/Contact/Engagement への引き渡し。
 
     Engagement.originating_lead_id を残すことで、Lead自体が将来アーカイブ
-    されてもチャネル別ROI集計の帰属を遡って辿れるようにする。
+    されてもチャネル別ROI集計の帰属を遡って辿れるようにする。案件化した
+    瞬間のスコア・接点サマリーは lead.conversion_snapshot に固定して残し、
+    Engagement側から「なぜこのタイミングで案件化したか」を辿れるようにする。
     """
     if lead.status == LeadStatus.CONVERTED:
         raise ValueError("この Lead は既に案件化済みです")
 
-    account = None
-    if lead.matched_account_id:
-        account = session.get(Account, lead.matched_account_id)
+    touches = list_touches(session, tenant_id, lead.id)
+    existing_account = (
+        session.get(Account, lead.matched_account_id) if lead.matched_account_id else None
+    )
+    score = compute_lead_score(lead, existing_account, touches)
+    snapshot = _build_conversion_snapshot(lead, touches, score)
+
+    account = existing_account
     if account is None:
         account = Account(tenant_id=tenant_id, name=lead.company_name)
         session.add(account)
@@ -102,6 +133,7 @@ def convert_lead(
     lead.converted_at = datetime.now(timezone.utc)
     lead.converted_engagement_id = engagement.id
     lead.matched_account_id = account.id
+    lead.conversion_snapshot = snapshot
     session.flush()
     return engagement
 

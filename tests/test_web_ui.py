@@ -423,12 +423,27 @@ class TestStageTransitionUi:
 
         resp = ui_client.post(
             f"/ui/engagements/{engagement.id}/stage",
-            data={"to_stage": "closed_lost"},
+            data={"to_stage": "closed_lost", "lost_reason": "競合A社に決定"},
             follow_redirects=False,
         )
         assert resp.status_code == 303
         db_session.refresh(engagement)
         assert engagement.stage == "closed_lost"
+        assert engagement.lost_reason == "競合A社に決定"
+
+    def test_mark_as_lost_without_reason_is_rejected(self, ui_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id, Stage.NEGOTIATION)
+        db_session.commit()
+
+        resp = ui_client.post(
+            f"/ui/engagements/{engagement.id}/stage",
+            data={"to_stage": "closed_lost"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert "flash_type=error" in resp.headers["location"]
+        db_session.refresh(engagement)
+        assert engagement.stage == "negotiation"
 
     def test_blocked_transition_without_waiver_shows_error(
         self, ui_client, db_session, tenant_id,

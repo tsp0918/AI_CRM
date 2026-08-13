@@ -104,6 +104,26 @@ class TestConvertLead:
         ).one()
         assert role is not None
 
+    def test_stores_conversion_snapshot(self, db_session, tenant_id):
+        lead = make_lead(tenant_id)
+        db_session.add(lead)
+        db_session.flush()
+        ll.record_touch(
+            db_session, tenant_id, lead, channel=TouchChannel.CONTENT_DOWNLOAD,
+        )
+        db_session.flush()
+
+        ll.convert_lead(db_session, tenant_id, lead, actor="human:ae-1")
+        db_session.commit()
+
+        snapshot = lead.conversion_snapshot
+        assert snapshot["touch_count"] == 1
+        assert snapshot["touch_channel_counts"] == {"content_download": 1}
+        assert snapshot["company_score"] >= 0
+        assert snapshot["person_score"] >= 0
+        assert snapshot["quadrant"] in ("hot", "watch", "nurture", "low")
+        assert "days_as_lead" in snapshot
+
     def test_reuses_matched_account_if_already_set(self, db_session, tenant_id):
         account = Account(tenant_id=tenant_id, name="既存取引先")
         db_session.add(account)

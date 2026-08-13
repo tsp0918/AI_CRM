@@ -1,0 +1,68 @@
+{% extends "_base.html" %}
+
+{% block title %}{{ sequence.name }} | Compliance-aware Agentic CRM{% endblock %}
+
+{% block extra_head %}
+<style>
+  .funnel-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .funnel-label { width: 160px; font-size: 13px; flex-shrink: 0; }
+  .funnel-track { flex: 1; height: 20px; background: #f3f4f6; border-radius: 4px; overflow: hidden; }
+  .funnel-fill { height: 100%; background: #2563eb; display: flex; align-items: center; justify-content: flex-end; padding-right: 6px; }
+  .funnel-pct { width: 100px; text-align: right; font-family: ui-monospace, monospace; font-size: 13px; flex-shrink: 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<p><a href="/ui/sequences">&larr; シーケンス一覧に戻る</a></p>
+<h1>{{ sequence.name }}</h1>
+<p class="subtitle">{{ sequence.description or "—" }}</p>
+
+<div class="card">
+  <h2>登録状況</h2>
+  <p class="subtitle" style="margin-bottom:12px;">
+    総登録数 <strong class="mono">{{ funnel.total_enrolled }}</strong>件
+    {% for status, count in funnel.status_counts.items() %} / {{ status }} {{ count }}件{% endfor %}
+  </p>
+
+  <h2 style="margin-top:18px;">ステップ到達率</h2>
+  {% for row in funnel.steps %}
+  <div class="funnel-row">
+    <div class="funnel-label">
+      ステップ{{ row.step.step_order + 1 }}
+      <span class="muted">({{ step_channel_labels.get(row.step.channel, row.step.channel) }})</span>
+    </div>
+    <div class="funnel-track">
+      <div class="funnel-fill" style="width:{{ row.reached_pct }}%;"></div>
+    </div>
+    <div class="funnel-pct">{{ row.reached_count }} / {{ funnel.total_enrolled }}({{ row.reached_pct }}%)</div>
+  </div>
+  {% endfor %}
+</div>
+
+{% for row in funnel.steps %}
+<div class="card">
+  <h2>
+    ステップ{{ row.step.step_order + 1 }} — {{ step_channel_labels.get(row.step.channel, row.step.channel) }}
+    <span class="muted" style="font-size:13px; font-weight:normal;">到達 {{ row.reached_count }}件</span>
+  </h2>
+  {% if row.entries %}
+  <table>
+    <thead><tr><th>Lead</th><th>会社</th><th>ステータス</th><th>このステップの状態</th><th>生成日時</th></tr></thead>
+    <tbody>
+      {% for entry in row.entries %}
+      <tr>
+        <td>{% if entry.lead %}<a href="/ui/leads/{{ entry.lead.id }}">{{ entry.lead.full_name }}</a>{% else %}—{% endif %}</td>
+        <td>{{ entry.lead.company_name if entry.lead else "—" }}</td>
+        <td>{{ lead_status_labels.get(entry.lead.status, entry.lead.status) if entry.lead else "—" }}</td>
+        <td>{{ entry.draft.status }}</td>
+        <td class="mono" style="font-size:11px;">{{ entry.draft.generated_at.strftime("%Y-%m-%d %H:%M") }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">まだ到達したLeadがいません。</div>
+  {% endif %}
+</div>
+{% endfor %}
+{% endblock %}

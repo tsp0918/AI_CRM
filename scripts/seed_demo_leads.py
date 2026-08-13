@@ -24,10 +24,11 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from crm_mvp.enums import (
-    LeadSourceChannel, LeadStatus, SequenceStepChannel, TouchChannel,
+    CampaignChannelType, LeadSourceChannel, LeadStatus, SequenceStepChannel,
+    TouchChannel,
 )
-from crm_mvp.models import Lead
-from crm_mvp.services.lead_lifecycle import record_touch
+from crm_mvp.models import Campaign, Lead
+from crm_mvp.services.lead_lifecycle import convert_lead, promote_lead, record_touch
 from crm_mvp.services.sequences import (
     create_sequence, enroll_lead, generate_due_drafts, mark_draft_reviewed,
 )
@@ -41,7 +42,7 @@ NOW = datetime.now(timezone.utc)
 
 LEAD_TABLES = [
     "sequence_draft", "sequence_enrollment", "sequence_step", "sequence",
-    "touch", "lead",
+    "touch", "lead", "campaign",
 ]
 
 
@@ -54,6 +55,21 @@ def wipe_lead_data(session: Session) -> None:
         session.execute(
             text(f"DELETE FROM {table} WHERE tenant_id = :tid"), {"tid": str(TENANT_ID)}
         )
+
+
+def build_demo_campaigns(session: Session) -> dict[str, Campaign]:
+    webinar = Campaign(
+        tenant_id=TENANT_ID, name="2026夏 製造業向けウェビナー",
+        channel_type=CampaignChannelType.EVENT, owner_team="marketing",
+        cost=500000, start_date=days_ago(20).date(), end_date=days_ago(13).date(),
+    )
+    outbound = Campaign(
+        tenant_id=TENANT_ID, name="IS 新規開拓アウトバウンドリスト Q3",
+        channel_type=CampaignChannelType.OUTBOUND_SEQUENCE, owner_team="inside_sales",
+    )
+    session.add_all([webinar, outbound])
+    session.flush()
+    return {"webinar": webinar, "outbound": outbound}
 
 
 def build_demo_sequence(session: Session):
@@ -96,7 +112,7 @@ def build_demo_sequence(session: Session):
     )
 
 
-def build_lead_hot(session: Session, sequence) -> Lead:
+def build_lead_hot(session: Session, sequence, campaign: Campaign | None = None) -> Lead:
     """Hot: 高関心度の接点複数 + 役職マッチ。ステップ0への反応(メール内
     リンクのクリック)を記録し、分岐でステップ1(架電)を飛ばしてステップ2
     (ホットパス)まで進める — 「step2まで実行が進んだ状態」の実行済みビュー。
@@ -105,6 +121,7 @@ def build_lead_hot(session: Session, sequence) -> Lead:
         tenant_id=TENANT_ID, company_name="関東鋳造株式会社", full_name="小林 直樹",
         title="生産技術部長", email="kobayashi@example.com",
         source_channel=LeadSourceChannel.CONTENT, status=LeadStatus.WORKING,
+        source_campaign_id=campaign.id if campaign else None,
         owner="IS 田中", written_by=f"human:{ACTOR_ID}", created_at=days_ago(6),
     )
     session.add(lead)
@@ -113,6 +130,7 @@ def build_lead_hot(session: Session, sequence) -> Lead:
     record_touch(
         session, TENANT_ID, lead, channel=TouchChannel.CONTENT_DOWNLOAD,
         occurred_at=days_ago(6), source_system="manual", actor="system",
+        campaign_id=campaign.id if campaign else None,
         raw_payload={"note": "導入事例資料をダウンロード"},
     )
     record_touch(
@@ -134,13 +152,14 @@ def build_lead_hot(session: Session, sequence) -> Lead:
     return lead
 
 
-def build_lead_watch(session: Session, sequence) -> Lead:
+def build_lead_watch(session: Session, sequence, campaign: Campaign | None = None) -> Lead:
     """Watch: 高関心度の接点はあるが1件のみ、役職不明。ステップ0への反応が
     無いため、既定どおりステップ1(架電)まで進める — 分岐しなかった側の
     パスを見せる対比。"""
     lead = Lead(
         tenant_id=TENANT_ID, company_name="三河バルブ工業株式会社", full_name="佐藤 健一",
         source_channel=LeadSourceChannel.OUTBOUND, status=LeadStatus.WORKING,
+        source_campaign_id=campaign.id if campaign else None,
         owner="IS 田中", written_by=f"human:{ACTOR_ID}", created_at=days_ago(3),
     )
     session.add(lead)
@@ -149,6 +168,7 @@ def build_lead_watch(session: Session, sequence) -> Lead:
     record_touch(
         session, TENANT_ID, lead, channel=TouchChannel.FORM_SUBMIT,
         occurred_at=days_ago(3), source_system="manual", actor="system",
+        campaign_id=campaign.id if campaign else None,
     )
 
     enroll_lead(session, TENANT_ID, lead, sequence, actor=f"human:{ACTOR_ID}", now=days_ago(3))
@@ -173,6 +193,43 @@ def build_lead_nurture(session: Session) -> Lead:
             session, TENANT_ID, lead, channel=TouchChannel.EMAIL_OPEN,
             occurred_at=days_ago(d), source_system="manual", actor="system",
         )
+    return lead
+
+
+def build_lead_converted(session: Session, campaign: Campaign | None = None) -> Lead:
+    """既に案件化済みのLead。SQLまで進めてから convert_lead を実行し、
+    Engagement側の「Lead発生経緯」カードを実データで確認できるようにする。
+    """
+    lead = Lead(
+        tenant_id=TENANT_ID, company_name="長野電子工業株式会社", full_name="高橋 美咲",
+        title="購買部 課長", email="takahashi@example.com",
+        source_channel=LeadSourceChannel.OUTBOUND, status=LeadStatus.WORKING,
+        source_campaign_id=campaign.id if campaign else None,
+        owner="IS 田中", written_by=f"human:{ACTOR_ID}", created_at=days_ago(18),
+    )
+    session.add(lead)
+    session.flush()
+
+    record_touch(
+        session, TENANT_ID, lead, channel=TouchChannel.CALL_CONNECTED,
+        occurred_at=days_ago(16), source_system="manual", actor="system",
+        campaign_id=campaign.id if campaign else None,
+        raw_payload={"note": "初回架電、来期予算での更新を検討中とのこと"},
+    )
+    record_touch(
+        session, TENANT_ID, lead, channel=TouchChannel.CONTENT_DOWNLOAD,
+        occurred_at=days_ago(12), source_system="manual", actor="system",
+        raw_payload={"note": "料金表資料をダウンロード"},
+    )
+    record_touch(
+        session, TENANT_ID, lead, channel=TouchChannel.FORM_SUBMIT,
+        occurred_at=days_ago(9), source_system="manual", actor="system",
+        raw_payload={"note": "商談希望フォームを送信"},
+    )
+
+    promote_lead(session, lead, LeadStatus.MQL)
+    promote_lead(session, lead, LeadStatus.SQL)
+    convert_lead(session, TENANT_ID, lead, actor=f"human:{ACTOR_ID}")
     return lead
 
 
@@ -212,10 +269,12 @@ def main() -> None:
         wipe_lead_data(session)
         session.commit()
 
+        campaigns = build_demo_campaigns(session)
         sequence = build_demo_sequence(session)
-        build_lead_hot(session, sequence)
-        build_lead_watch(session, sequence)
+        build_lead_hot(session, sequence, campaign=campaigns["webinar"])
+        build_lead_watch(session, sequence, campaign=campaigns["outbound"])
         build_lead_nurture(session)
+        build_lead_converted(session, campaign=campaigns["outbound"])
         build_lead_low(session)
         session.commit()
 

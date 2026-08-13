@@ -271,3 +271,62 @@ def dismiss_draft(
     draft.reviewed_at = now or datetime.now(timezone.utc)
     draft.reviewed_by = reviewed_by
     return draft
+
+
+def sequence_funnel(session: Session, tenant_id: uuid.UUID, sequence_id: uuid.UUID) -> dict:
+    """シーケンス1件分の効果を可視化する。各ステップについて「登録total件中
+    何件がそこに到達したか」を%で出す(分岐でスキップされた経路は
+    到達に数えない)。あわせてステップごとの到達Lead一覧も返す。
+    """
+    steps = _steps_for(session, tenant_id, sequence_id)
+    enrollments = session.execute(
+        select(SequenceEnrollment).where(
+            SequenceEnrollment.tenant_id == tenant_id,
+            SequenceEnrollment.sequence_id == sequence_id,
+        )
+    ).scalars().all()
+    total = len(enrollments)
+    enrollment_by_id = {e.id: e for e in enrollments}
+
+    drafts: list[SequenceDraft] = []
+    if enrollments:
+        drafts = session.execute(
+            select(SequenceDraft).where(
+                SequenceDraft.tenant_id == tenant_id,
+                SequenceDraft.enrollment_id.in_(list(enrollment_by_id)),
+            ).order_by(SequenceDraft.generated_at)
+        ).scalars().all()
+
+    lead_ids = {e.lead_id for e in enrollments}
+    leads_by_id = {}
+    if lead_ids:
+        leads_by_id = {
+            lead.id: lead for lead in session.execute(
+                select(Lead).where(Lead.tenant_id == tenant_id, Lead.id.in_(lead_ids))
+            ).scalars()
+        }
+
+    steps_out = []
+    for step in steps:
+        step_drafts = [d for d in drafts if d.step_id == step.id]
+        seen: set[uuid.UUID] = set()
+        entries = []
+        for draft in step_drafts:
+            if draft.enrollment_id in seen:
+                continue
+            seen.add(draft.enrollment_id)
+            enrollment = enrollment_by_id.get(draft.enrollment_id)
+            lead = leads_by_id.get(enrollment.lead_id) if enrollment else None
+            entries.append({"lead": lead, "enrollment": enrollment, "draft": draft})
+        reached = len(seen)
+        steps_out.append({
+            "step": step, "reached_count": reached,
+            "reached_pct": round(reached / total * 100) if total else 0,
+            "entries": entries,
+        })
+
+    status_counts: dict[str, int] = {}
+    for e in enrollments:
+        status_counts[e.status] = status_counts.get(e.status, 0) + 1
+
+    return {"total_enrolled": total, "steps": steps_out, "status_counts": status_counts}

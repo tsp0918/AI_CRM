@@ -69,6 +69,11 @@ class Lead(Base, UUIDPk, Timestamped, Provenance, TenantScoped):
     converted_engagement_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("engagement.id", ondelete="SET NULL"), index=True
     )
+    # 案件化した瞬間のスコア・接点サマリーのスナップショット。案件化後は
+    # Leadの状態が動かなくなる一方、Engagement側では「なぜこのタイミングで
+    # 案件化したか」を知りたい需要がある。StageTransition.gate_snapshot と
+    # 同じ考え方で、その場限りの状態を JSONB にそのまま残す。
+    conversion_snapshot: Mapped[dict] = mapped_column(JSONB, default=dict)
 
 
 class Touch(Base, UUIDPk, TenantScoped):

@@ -1,0 +1,70 @@
+{% extends "_base.html" %}
+
+{% block title %}Campaigns | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<h1>Campaigns</h1>
+<p class="subtitle">Marketing/Inside Sales施策のROI集計単位。Lead登録時に紐付けます。</p>
+
+{% if rows %}
+<div class="card" style="padding:0;">
+  <table>
+    <thead><tr><th>名前</th><th>種別</th><th>担当チーム</th><th>Lead数</th><th>案件化数</th></tr></thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>{{ row.campaign.name }}</td>
+        <td>{{ channel_labels.get(row.campaign.channel_type, row.campaign.channel_type) }}</td>
+        <td class="muted">{{ row.campaign.owner_team or "—" }}</td>
+        <td class="mono">{{ row.lead_count }}</td>
+        <td class="mono">{{ row.converted_count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card"><div class="empty-state">まだCampaignがありません。下のフォームから作成してください。</div></div>
+{% endif %}
+
+<div class="card">
+  <h2>+ 新規Campaign</h2>
+  <form method="post" action="/ui/campaigns/new">
+    <div class="field-row">
+      <div>
+        <label for="name">名前</label>
+        <input type="text" id="name" name="name" required placeholder="例: 2026夏 製造業向けウェビナー">
+      </div>
+      <div>
+        <label for="channel_type">種別</label>
+        <select id="channel_type" name="channel_type">
+          {% for c in channel_types %}
+          <option value="{{ c.value }}">{{ channel_labels.get(c.value, c.value) }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="field-row">
+      <div>
+        <label for="owner_team">担当チーム(任意)</label>
+        <input type="text" id="owner_team" name="owner_team" placeholder="例: marketing">
+      </div>
+      <div>
+        <label for="cost">費用(任意)</label>
+        <input type="text" id="cost" name="cost" placeholder="例: 500000">
+      </div>
+    </div>
+    <div class="field-row">
+      <div>
+        <label for="start_date">開始日(任意)</label>
+        <input type="text" id="start_date" name="start_date" placeholder="YYYY-MM-DD">
+      </div>
+      <div>
+        <label for="end_date">終了日(任意)</label>
+        <input type="text" id="end_date" name="end_date" placeholder="YYYY-MM-DD">
+      </div>
+    </div>
+    <button type="submit" class="btn">作成する</button>
+  </form>
+</div>
+{% endblock %}

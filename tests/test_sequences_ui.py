@@ -288,3 +288,39 @@ class TestPipelineView:
         assert resp.status_code == 200
         assert "実行中" in resp.text
         assert "未到達" in resp.text
+
+
+class TestSequenceDetail:
+    def test_shows_funnel_and_per_step_leads(self, ui_client, db_session, tenant_id):
+        ui_client.post(
+            "/ui/sequences/new",
+            data={
+                "name": "ファネル確認用",
+                "channel_0": "email", "delay_days_0": "0", "body_0": "{{full_name}}様1通目",
+                "channel_1": "call_task", "delay_days_1": "3", "body_1": "架電",
+            },
+        )
+        sequence = db_session.query(Sequence).filter_by(
+            tenant_id=tenant_id, name="ファネル確認用",
+        ).one()
+        lead1 = make_lead(db_session, tenant_id, full_name="鈴木 一郎")
+        lead2 = make_lead(db_session, tenant_id, full_name="佐藤 花子")
+        db_session.commit()
+
+        ui_client.post(
+            "/ui/leads/bulk-enroll",
+            data={"lead_ids": [str(lead1.id), str(lead2.id)], "sequence_id": str(sequence.id)},
+        )
+        ui_client.post("/ui/sequences/generate-due")  # 両方ともstep0到達
+
+        resp = ui_client.get(f"/ui/sequences/{sequence.id}")
+        assert resp.status_code == 200
+        assert "総登録数" in resp.text
+        assert "鈴木 一郎" in resp.text
+        assert "佐藤 花子" in resp.text
+        assert "2 / 2" in resp.text  # ステップ1到達率
+
+    def test_other_tenant_sequence_is_404(self, ui_client, db_session):
+        import uuid
+        resp = ui_client.get(f"/ui/sequences/{uuid.uuid4()}")
+        assert resp.status_code == 404

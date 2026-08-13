@@ -29,7 +29,10 @@ class Engagement(Base, UUIDPk, Timestamped, TenantScoped):
     )
     name: Mapped[str] = mapped_column(String(255))
     stage: Mapped[Stage] = mapped_column(String(24), default=Stage.LEAD, index=True)
-    owner_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    # 自由記述名。ユーザーテーブルが存在しないため、Lead.owner と同じ表現に
+    # 揃える(旧 owner_id: UUID は参照先が無く、どこからも書き込まれない
+    # 死んだ列だったため置き換えた)。
+    owner: Mapped[str | None] = mapped_column(String(120))
 
     amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
     currency: Mapped[str] = mapped_column(String(3), default="JPY")
@@ -37,6 +40,11 @@ class Engagement(Base, UUIDPk, Timestamped, TenantScoped):
     # 担当者が申告するクローズ日と、稟議ルートから逆算した推定日を必ず分けて持つ。
     expected_close_date: Mapped[date | None] = mapped_column(Date)
     derived_close_date: Mapped[date | None] = mapped_column(Date)
+
+    # closed_lost 時の理由。失注の背景を後から追跡できるようにする
+    # (stage_transition.gate_snapshot はゲート判定の記録であり、
+    # 「競合に負けた/予算凍結」等のビジネス上の理由は別に残す必要がある)。
+    lost_reason: Mapped[str | None] = mapped_column(Text)
 
     external_system: Mapped[str | None] = mapped_column(String(32))
     external_id: Mapped[str | None] = mapped_column(String(128))

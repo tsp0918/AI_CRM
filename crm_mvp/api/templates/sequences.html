@@ -22,7 +22,7 @@
     <tbody>
       {% for row in rows %}
       <tr>
-        <td>{{ row.sequence.name }}</td>
+        <td><a href="/ui/sequences/{{ row.sequence.id }}">{{ row.sequence.name }}</a></td>
         <td class="muted">{{ row.sequence.description or "—" }}</td>
         <td class="mono">{{ row.step_count }}</td>
         <td class="mono">{{ row.active_count }}</td>

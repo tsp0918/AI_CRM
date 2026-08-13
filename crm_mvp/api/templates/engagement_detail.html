@@ -40,6 +40,52 @@
   </div>
 </div>
 
+{% if originating_lead %}
+{% set snap = originating_lead.conversion_snapshot %}
+<!-- Lead発生経緯(案件化した瞬間のLeadサマリー) -->
+<div class="card">
+  <h2>Lead発生経緯</h2>
+  <p class="subtitle" style="margin-bottom:12px;">
+    <a href="/ui/leads/{{ originating_lead.id }}">{{ originating_lead.full_name }}</a> 様のLeadから、
+    {{ originating_lead.converted_at.strftime("%Y-%m-%d") if originating_lead.converted_at else "—" }} に案件化されました。
+  </p>
+  {% if snap %}
+  <div class="field-row">
+    <div>
+      <p class="subtitle" style="margin-bottom:4px;">案件化時点の温度</p>
+      <span class="quadrant-badge quadrant-{{ snap.quadrant }}">{{ snap.quadrant }}</span>
+      <span class="mono" style="margin-left:8px; font-size:13px;">Company {{ snap.company_score }} / Person {{ snap.person_score }}</span>
+    </div>
+    <div>
+      <p class="subtitle" style="margin-bottom:4px;">獲得経路</p>
+      <p style="margin:0; font-size:13px;">
+        {{ source_channel_labels.get(snap.source_channel, snap.source_channel) if snap.source_channel else "未設定" }}
+        {% if originating_campaign %} / {{ originating_campaign.name }}{% endif %}
+      </p>
+    </div>
+  </div>
+  {% if snap.touch_channel_counts %}
+  <p class="subtitle" style="margin:12px 0 4px;">
+    案件化までの接点({{ snap.touch_count }}件・Leadとして{{ snap.days_as_lead }}日間)
+  </p>
+  <ul style="font-size:13px; padding-left:18px; margin:0;">
+    {% for ch, count in snap.touch_channel_counts.items() %}
+    <li>{{ touch_channel_labels.get(ch, ch) }}: {{ count }}件</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if snap.company_reasons or snap.person_reasons %}
+  <p class="subtitle" style="margin:12px 0 4px;">スコアの根拠(案件化時点)</p>
+  <ul style="font-size:12px; color:#4b5563; padding-left:18px; margin:0;">
+    {% for r in snap.company_reasons %}<li>{{ r }}</li>{% endfor %}
+    {% for r in snap.person_reasons %}<li>{{ r }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  {% endif %}
+  <p style="margin-top:12px;"><a href="/ui/leads/{{ originating_lead.id }}">Lead詳細を見る(全接点・シーケンス履歴)&rarr;</a></p>
+</div>
+{% endif %}
+
 <!-- 最近の活動 -->
 <div class="card">
   <h2>最近の活動</h2>
@@ -123,12 +169,20 @@
     <p class="muted">これ以上進むステージがありません。</p>
   {% endif %}
 
+  {% if engagement.stage == "closed_lost" and engagement.lost_reason %}
+  <p class="quote-box" style="margin-top:12px;">失注理由: {{ engagement.lost_reason }}</p>
+  {% endif %}
+
   {% if engagement.stage not in ["closed_won", "closed_lost"] %}
-  <form method="post" action="/ui/engagements/{{ engagement.id }}/stage" style="margin-top:16px;"
-        onsubmit="return confirm('この案件を失注にしますか?');">
-    <input type="hidden" name="to_stage" value="closed_lost">
-    <button type="submit" class="btn btn-secondary btn-sm">失注にする</button>
-  </form>
+  <details style="margin-top:16px;">
+    <summary style="cursor:pointer; font-size:13px; color:#991b1b;">失注にする</summary>
+    <form method="post" action="/ui/engagements/{{ engagement.id }}/stage" style="margin-top:10px; max-width:420px;">
+      <input type="hidden" name="to_stage" value="closed_lost">
+      <label for="lost_reason">失注理由</label>
+      <textarea id="lost_reason" name="lost_reason" required placeholder="例: 競合A社に決定、価格が要因"></textarea>
+      <button type="submit" class="btn btn-danger btn-sm">失注にする</button>
+    </form>
+  </details>
   {% endif %}
 
   {% if waivers %}

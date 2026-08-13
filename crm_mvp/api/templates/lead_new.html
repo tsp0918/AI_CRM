@@ -44,6 +44,18 @@
         </select>
       </div>
     </div>
+    <label for="source_campaign_id">Campaign</label>
+    <select id="source_campaign_id" name="source_campaign_id">
+      <option value="">(なし)</option>
+      {% for c in campaigns %}
+      <option value="{{ c.id }}">{{ c.name }}</option>
+      {% endfor %}
+    </select>
+    {% if not campaigns %}
+    <p class="muted" style="font-size:12px; margin:-8px 0 14px;">
+      Campaignが未作成です。<a href="/ui/campaigns">Campaignを作成する</a>と、マーケ活動別のROIを追跡できます。
+    </p>
+    {% endif %}
     <button type="submit" class="btn">登録する</button>
   </form>
 </div>

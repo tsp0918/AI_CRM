@@ -17,7 +17,9 @@ from sqlalchemy.orm import Session
 from ...enums import (
     LeadSourceChannel, LeadStatus, SequenceEnrollmentStatus, TouchChannel,
 )
-from ...models import Account, Lead, Sequence, SequenceDraft, SequenceEnrollment, SequenceStep
+from ...models import (
+    Account, Campaign, Lead, Sequence, SequenceDraft, SequenceEnrollment, SequenceStep,
+)
 from ...services.lead_lifecycle import (
     convert_lead, disqualify_lead, list_touches, maybe_promote_to_mql,
     promote_lead, record_touch,
@@ -174,8 +176,12 @@ def lead_new_form(
     ui_session: UiSession = Depends(require_ui_session),
     session: Session = Depends(get_ui_db_session),
 ) -> HTMLResponse:
+    campaigns = session.execute(
+        select(Campaign).where(Campaign.tenant_id == ui_session.tenant_id)
+        .order_by(Campaign.name)
+    ).scalars().all()
     context = base_context(session, ui_session, active_nav="leads")
-    context.update({"source_channels": list(LeadSourceChannel)})
+    context.update({"source_channels": list(LeadSourceChannel), "campaigns": campaigns})
     return templates.TemplateResponse(request, "lead_new.html", context)
 
 
@@ -187,6 +193,7 @@ def lead_new_submit(
     email: str = Form(""),
     phone: str = Form(""),
     source_channel: str = Form(""),
+    source_campaign_id: str = Form(""),
     ui_session: UiSession = Depends(require_ui_session),
     session: Session = Depends(get_ui_db_session),
 ) -> RedirectResponse:
@@ -200,6 +207,7 @@ def lead_new_submit(
         full_name=full_name.strip(), title=title.strip() or None,
         email=email.strip() or None, phone=phone.strip() or None,
         source_channel=LeadSourceChannel(source_channel) if source_channel else None,
+        source_campaign_id=uuid.UUID(source_campaign_id) if source_campaign_id else None,
         owner=ui_session.actor_name, written_by=f"human:{ui_session.actor_id}",
     )
     session.add(lead)
@@ -227,6 +235,8 @@ def lead_detail(
     lead = _get_lead_or_404(session, ui_session, lead_id)
     ctx = _score_and_context(session, ui_session.tenant_id, lead)
     next_status = NEXT_STATUS.get(lead.status)
+
+    campaign = session.get(Campaign, lead.source_campaign_id) if lead.source_campaign_id else None
 
     available_sequences = session.execute(
         select(Sequence).where(
@@ -272,7 +282,7 @@ def lead_detail(
         "enrollments": enrollments, "sequence_names": sequence_names,
         "drafts": drafts, "step_channel_labels": STEP_CHANNEL_LABELS,
         "active_enrollment_status": SequenceEnrollmentStatus.ACTIVE,
-        "pipelines": pipelines,
+        "pipelines": pipelines, "campaign": campaign,
     })
     return templates.TemplateResponse(request, "lead_detail.html", context)
 
