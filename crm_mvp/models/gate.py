@@ -9,12 +9,12 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base, Provenance, TenantScoped, Timestamped, UUIDPk
-from ..enums import ArtifactType, GateKind, GateStrength, Stage
+from ..enums import ActionItemStatus, ArtifactType, GateKind, GateStrength, Stage
 
 
 class GatePolicy(Base, UUIDPk, Timestamped, TenantScoped):
@@ -74,3 +74,34 @@ class Waiver(Base, UUIDPk, Provenance, TenantScoped):
     reason: Mapped[str] = mapped_column(Text)
     valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ActionItem(Base, UUIDPk, Timestamped, Provenance, TenantScoped):
+    """『次の一手』のタスク化(ロードマップ§6)。
+
+    gate_engine.GateResult.next_best_action() は毎回のゲート評価から導出
+    される揮発的な値(常に1件だけを示す設計)。これをアサインした瞬間の
+    状態として1件残すことで、マネージャーが担当者に指示し、完了状況を
+    追跡できるようにする。written_by(Provenance)がアサインした人。
+    """
+
+    __tablename__ = "action_item"
+
+    engagement_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("engagement.id", ondelete="CASCADE"), index=True
+    )
+    field_path: Mapped[str] = mapped_column(String(96))
+    reason: Mapped[str] = mapped_column(Text)
+    play: Mapped[str | None] = mapped_column(Text)
+
+    assigned_to: Mapped[str] = mapped_column(String(120))
+    status: Mapped[ActionItemStatus] = mapped_column(
+        String(16), default=ActionItemStatus.OPEN, index=True
+    )
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_note: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        Index("ix_action_item_open", "engagement_id", "status"),
+    )

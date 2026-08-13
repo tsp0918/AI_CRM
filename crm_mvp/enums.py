@@ -114,6 +114,7 @@ class SourceKind(StrEnum):
     EMAIL = "email"
     FREE_NOTE = "free_note"           # 自由記述メモ（唯一の手入力口）
     CRM_SYNC = "crm_sync"             # 既存 CRM からの取り込み
+    CALENDAR_SYNC = "calendar_sync"   # Outlook/Teams 等からの自動同期（会議録・出席者）
 
 
 class ComplianceCheckType(StrEnum):
@@ -145,3 +146,11 @@ class VerificationMethod(StrEnum):
 
     CUSTOMER_DOCUMENT = "customer_document"   # 標準: 顧客発の文書・発言の添付
     MANAGER_CONFIRMATION = "manager_confirmation"  # 代替: 上長による確認
+
+
+class ActionItemStatus(StrEnum):
+    """『次の一手』をタスク化した ActionItem の状態。"""
+
+    OPEN = "open"
+    DONE = "done"
+    DISMISSED = "dismissed"

@@ -1,0 +1,401 @@
+"""案件の新規作成・詳細・ステージ遷移・Waiver発行・VERIFIED昇格(骨格 CRM の中核)。"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from ...enums import Confidence, Criterion, ProposalStatus, Stage, VerificationMethod
+from ...models import (
+    Account, ActionItem, Engagement, ExtractionProposal, GraphNode,
+    IngestionSource, QualificationSlot, Waiver,
+)
+from ...services.action_items import (
+    assign_action_item, complete_action_item, dismiss_action_item,
+    list_open_action_items,
+)
+from ...services.activity_log import load_activity_log
+from ...services.confidence_score import compute_confidence_score, score_reasons
+from ...services.decay_policy import compute_decays_at
+from ...services.stage_transitions import (
+    STAGE_ORDER, apply_stage_transition, evaluate_stage_gate, load_gate_context,
+    next_stage,
+)
+from .common import CRITERION_LABELS, base_context, redirect_with_flash
+from .session import UiSession, get_ui_db_session, require_ui_session
+from .templates import templates
+
+router = APIRouter(tags=["web"])
+
+
+# --- 新規案件作成 ------------------------------------------------------------
+
+@router.get("/ui/engagements/new", response_class=HTMLResponse)
+def engagement_new_form(
+    request: Request,
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> HTMLResponse:
+    context = base_context(session, ui_session, active_nav="new")
+    return templates.TemplateResponse(request, "engagement_new.html", context)
+
+
+@router.post("/ui/engagements/new")
+def engagement_new_submit(
+    account_name: str = Form(...),
+    engagement_name: str = Form(...),
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> RedirectResponse:
+    if not account_name.strip() or not engagement_name.strip():
+        return redirect_with_flash(
+            "/ui/engagements/new", "取引先名と案件名を入力してください", "error",
+        )
+
+    account = Account(tenant_id=ui_session.tenant_id, name=account_name.strip())
+    session.add(account)
+    session.flush()
+
+    engagement = Engagement(
+        tenant_id=ui_session.tenant_id, account_id=account.id,
+        name=engagement_name.strip(), stage=Stage.LEAD,
+    )
+    session.add(engagement)
+    session.commit()
+
+    return redirect_with_flash(
+        f"/ui/engagements/{engagement.id}", "案件を作成しました。情報を投入して育てていきましょう。",
+    )
+
+
+# --- 案件詳細 ----------------------------------------------------------------
+
+def _get_engagement_or_404(
+    session: Session, ui_session: UiSession, engagement_id: uuid.UUID,
+) -> Engagement:
+    engagement = session.get(Engagement, engagement_id)
+    if engagement is None or engagement.tenant_id != ui_session.tenant_id:
+        raise HTTPException(status_code=404, detail="engagement not found")
+    return engagement
+
+
+@router.get("/ui/engagements/{engagement_id}", response_class=HTMLResponse)
+def engagement_detail(
+    request: Request,
+    engagement_id: uuid.UUID,
+    flash: str | None = None,
+    flash_type: str = "info",
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> HTMLResponse:
+    engagement = _get_engagement_or_404(session, ui_session, engagement_id)
+    account = session.get(Account, engagement.account_id)
+
+    target_stage = next_stage(engagement.stage)
+    policy, gate, next_best_action = (None, None, None)
+    if target_stage is not None:
+        policy, gate = evaluate_stage_gate(
+            session, ui_session.tenant_id, engagement, target_stage,
+        )
+        next_best_action = gate.next_best_action()
+
+    slot_rows = session.execute(
+        select(QualificationSlot).where(
+            QualificationSlot.tenant_id == ui_session.tenant_id,
+            QualificationSlot.engagement_id == engagement.id,
+        )
+    ).scalars().all()
+    slots_by_criterion = {s.criterion: s for s in slot_rows}
+    criteria = [
+        {"criterion": c, "slot": slots_by_criterion.get(c.value)}
+        for c in Criterion
+    ]
+
+    pending_proposals = session.execute(
+        select(ExtractionProposal).where(
+            ExtractionProposal.tenant_id == ui_session.tenant_id,
+            ExtractionProposal.engagement_id == engagement.id,
+            ExtractionProposal.status == ProposalStatus.PENDING,
+        ).order_by(ExtractionProposal.created_at.desc())
+    ).scalars().all()
+
+    sources = session.execute(
+        select(IngestionSource).where(
+            IngestionSource.tenant_id == ui_session.tenant_id,
+            IngestionSource.engagement_id == engagement.id,
+        ).order_by(IngestionSource.created_at.desc()).limit(5)
+    ).scalars().all()
+
+    node_count = session.execute(
+        select(func.count()).select_from(GraphNode).where(
+            GraphNode.tenant_id == ui_session.tenant_id,
+            GraphNode.account_id == engagement.account_id,
+        )
+    ).scalar_one()
+
+    waivers = session.execute(
+        select(Waiver).where(
+            Waiver.tenant_id == ui_session.tenant_id,
+            Waiver.engagement_id == engagement.id,
+        ).order_by(Waiver.approved_at.desc())
+    ).scalars().all()
+    matching_waiver = next(
+        (w for w in waivers if policy and w.policy_id == policy.id), None,
+    )
+
+    recent_activity = load_activity_log(session, ui_session.tenant_id, engagement)[:5]
+
+    gate_ctx = load_gate_context(session, ui_session.tenant_id, engagement)
+    score = compute_confidence_score(
+        gate_ctx["slots"], gate_ctx["nodes"], gate_ctx["edges"], gate_ctx["roles"],
+    )
+    reasons = score_reasons(score, CRITERION_LABELS)
+
+    open_actions = list_open_action_items(session, ui_session.tenant_id, engagement.id)
+
+    context = base_context(
+        session, ui_session, active_nav="dashboard", flash=flash, flash_type=flash_type,
+    )
+    context.update({
+        "engagement": engagement, "account": account,
+        "target_stage": target_stage, "policy": policy, "gate": gate,
+        "next_best_action": next_best_action,
+        "criteria": criteria, "pending_proposals": pending_proposals,
+        "sources": sources, "node_count": node_count, "waivers": waivers,
+        "matching_waiver": matching_waiver,
+        "stage_order": STAGE_ORDER,
+        "verification_methods": list(VerificationMethod),
+        "recent_activity": recent_activity,
+        "score": score, "score_reasons": reasons,
+        "open_actions": open_actions,
+    })
+    return templates.TemplateResponse(request, "engagement_detail.html", context)
+
+
+# --- 活動ログ -----------------------------------------------------------------
+
+@router.get("/ui/engagements/{engagement_id}/activity", response_class=HTMLResponse)
+def activity_log_page(
+    request: Request,
+    engagement_id: uuid.UUID,
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> HTMLResponse:
+    engagement = _get_engagement_or_404(session, ui_session, engagement_id)
+    account = session.get(Account, engagement.account_id)
+    activity = load_activity_log(session, ui_session.tenant_id, engagement)
+
+    context = base_context(session, ui_session, active_nav="dashboard")
+    context.update({
+        "engagement": engagement, "account": account, "activity": activity,
+    })
+    return templates.TemplateResponse(request, "activity_log.html", context)
+
+
+# --- ステージ遷移 -------------------------------------------------------------
+
+@router.post("/ui/engagements/{engagement_id}/stage")
+def transition_stage_ui(
+    engagement_id: uuid.UUID,
+    to_stage: str = Form(...),
+    waiver_id: str = Form(""),
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> RedirectResponse:
+    engagement = _get_engagement_or_404(session, ui_session, engagement_id)
+    wid = uuid.UUID(waiver_id) if waiver_id else None
+
+    try:
+        outcome = apply_stage_transition(
+            session, ui_session.tenant_id, engagement, Stage(to_stage),
+            waiver_id=wid, actor=f"human:{ui_session.actor_id}",
+        )
+    except ValueError as exc:
+        session.rollback()
+        return redirect_with_flash(
+            f"/ui/engagements/{engagement_id}", str(exc), "error",
+        )
+
+    if not outcome.allowed:
+        session.rollback()
+        return redirect_with_flash(
+            f"/ui/engagements/{engagement_id}",
+            "ゲートがこの遷移をブロックしています。Waiver を発行してください。", "error",
+        )
+
+    session.commit()
+    return redirect_with_flash(
+        f"/ui/engagements/{engagement_id}",
+        f"ステージを「{to_stage}」に更新しました",
+    )
+
+
+# --- Waiver 発行 --------------------------------------------------------------
+
+@router.post("/ui/engagements/{engagement_id}/waivers")
+def create_waiver_ui(
+    engagement_id: uuid.UUID,
+    policy_id: str = Form(...),
+    reason: str = Form(...),
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> RedirectResponse:
+    engagement = _get_engagement_or_404(session, ui_session, engagement_id)
+    if not reason.strip():
+        return redirect_with_flash(
+            f"/ui/engagements/{engagement_id}", "Waiver の理由を入力してください", "error",
+        )
+
+    waiver = Waiver(
+        tenant_id=ui_session.tenant_id, engagement_id=engagement.id,
+        policy_id=uuid.UUID(policy_id), approved_by=ui_session.actor_id,
+        reason=reason.strip(), approved_at=datetime.now(timezone.utc),
+        written_by=f"human:{ui_session.actor_id}",
+    )
+    session.add(waiver)
+    session.commit()
+
+    return redirect_with_flash(
+        f"/ui/engagements/{engagement_id}", "Waiver を発行しました。ステージ遷移を再度お試しください。",
+    )
+
+
+# --- VERIFIED 昇格 ------------------------------------------------------------
+
+@router.post("/ui/engagements/{engagement_id}/slots/{criterion}/verify")
+def verify_slot_ui(
+    engagement_id: uuid.UUID,
+    criterion: Criterion,
+    method: VerificationMethod = Form(...),
+    evidence_uri: str = Form(""),
+    note: str = Form(""),
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> RedirectResponse:
+    engagement = _get_engagement_or_404(session, ui_session, engagement_id)
+
+    if method == VerificationMethod.CUSTOMER_DOCUMENT and not evidence_uri.strip():
+        return redirect_with_flash(
+            f"/ui/engagements/{engagement_id}",
+            "customer_document 方式には証跡の参照(URI)が必須です", "error",
+        )
+    if method == VerificationMethod.MANAGER_CONFIRMATION and not note.strip():
+        return redirect_with_flash(
+            f"/ui/engagements/{engagement_id}",
+            "manager_confirmation 方式には確認内容の記録が必須です", "error",
+        )
+
+    slot = session.execute(
+        select(QualificationSlot).where(
+            QualificationSlot.tenant_id == ui_session.tenant_id,
+            QualificationSlot.engagement_id == engagement.id,
+            QualificationSlot.criterion == criterion,
+        )
+    ).scalar_one_or_none()
+    if slot is None:
+        return redirect_with_flash(
+            f"/ui/engagements/{engagement_id}",
+            "まだ値が無い項目は検証できません。先に情報を投入してください。", "error",
+        )
+
+    now = datetime.now(timezone.utc)
+    slot.confidence = Confidence.VERIFIED
+    slot.evidence_uri = evidence_uri.strip() or None
+    slot.verification_method = method
+    slot.verification_note = note.strip() or None
+    slot.verified_by = ui_session.actor_id
+    slot.verified_at = now
+    slot.decays_at = compute_decays_at(criterion, now)
+    slot.written_by = f"human:{ui_session.actor_id}"
+    session.commit()
+
+    return redirect_with_flash(
+        f"/ui/engagements/{engagement_id}", f"{criterion.value} を検証済みにしました",
+    )
+
+
+# --- 次の一手のタスク化 --------------------------------------------------------
+
+@router.post("/ui/engagements/{engagement_id}/actions")
+def assign_next_best_action_ui(
+    engagement_id: uuid.UUID,
+    assigned_to: str = Form(...),
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> RedirectResponse:
+    """今この瞬間のゲート評価から next_best_action を再計算し、それを
+    タスクとしてアサインする。クライアントが送ってきた reason/play を
+    信用せず、常にサーバー側で新鮮に再計算する。"""
+    engagement = _get_engagement_or_404(session, ui_session, engagement_id)
+    if not assigned_to.strip():
+        return redirect_with_flash(
+            f"/ui/engagements/{engagement_id}", "担当者名を入力してください", "error",
+        )
+
+    target_stage = next_stage(engagement.stage)
+    if target_stage is None:
+        return redirect_with_flash(
+            f"/ui/engagements/{engagement_id}", "これ以上進むステージがありません", "error",
+        )
+    _, gate = evaluate_stage_gate(session, ui_session.tenant_id, engagement, target_stage)
+    action = gate.next_best_action()
+    if action is None:
+        return redirect_with_flash(
+            f"/ui/engagements/{engagement_id}", "現時点で提示できる次の一手がありません", "error",
+        )
+
+    assign_action_item(
+        session, ui_session.tenant_id, engagement.id, action,
+        assigned_to=assigned_to.strip(), assigned_by=f"human:{ui_session.actor_id}",
+    )
+    session.commit()
+    return redirect_with_flash(
+        f"/ui/engagements/{engagement_id}", f"{assigned_to.strip()} に次の一手をアサインしました",
+    )
+
+
+def _get_action_or_404(
+    session: Session, ui_session: UiSession, engagement_id: uuid.UUID, action_id: uuid.UUID,
+) -> ActionItem:
+    action = session.execute(
+        select(ActionItem).where(
+            ActionItem.tenant_id == ui_session.tenant_id,
+            ActionItem.id == action_id, ActionItem.engagement_id == engagement_id,
+        )
+    ).scalar_one_or_none()
+    if action is None:
+        raise HTTPException(status_code=404, detail="action item not found")
+    return action
+
+
+@router.post("/ui/engagements/{engagement_id}/actions/{action_id}/complete")
+def complete_action_item_ui(
+    engagement_id: uuid.UUID,
+    action_id: uuid.UUID,
+    note: str = Form(""),
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> RedirectResponse:
+    action = _get_action_or_404(session, ui_session, engagement_id, action_id)
+    complete_action_item(action, note=note.strip() or None)
+    session.commit()
+    return redirect_with_flash(f"/ui/engagements/{engagement_id}", "アクションを完了にしました")
+
+
+@router.post("/ui/engagements/{engagement_id}/actions/{action_id}/dismiss")
+def dismiss_action_item_ui(
+    engagement_id: uuid.UUID,
+    action_id: uuid.UUID,
+    note: str = Form(""),
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> RedirectResponse:
+    action = _get_action_or_404(session, ui_session, engagement_id, action_id)
+    dismiss_action_item(action, note=note.strip() or None)
+    session.commit()
+    return redirect_with_flash(f"/ui/engagements/{engagement_id}", "アクションを却下にしました")

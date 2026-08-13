@@ -1,0 +1,283 @@
+{% extends "_base.html" %}
+
+{% block title %}{{ engagement.name }} | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<p><a href="/ui/">&larr; ダッシュボードに戻る</a></p>
+<h1>{{ engagement.name }}</h1>
+<p class="subtitle">
+  {{ account.name if account else "—" }} /
+  <span class="badge badge-stage-{{ engagement.stage }}">{{ stage_labels.get(engagement.stage, engagement.stage) }}</span>
+  {% if engagement.amount %} / {{ "{:,.0f}".format(engagement.amount) }} {{ engagement.currency }}{% endif %}
+  / <a href="/ui/engagements/{{ engagement.id }}/activity">活動ログを見る &rarr;</a>
+</p>
+
+<!-- 客観的クロージング確度スコア -->
+<div class="card">
+  <div class="score-hero">
+    <div class="score-num score-badge-{{ score.band }}">{{ score.total }}</div>
+    <div class="score-hero-body">
+      <h2 style="margin-bottom:6px;">クロージング確度スコア</h2>
+      <div class="score-bar">
+        <span class="score-seg-evidence" style="width:{{ score.evidence_points }}%"></span>
+        <span class="score-seg-governance" style="width:{{ score.governance_points }}%"></span>
+        <span class="score-seg-freshness" style="width:{{ score.freshness_points }}%"></span>
+      </div>
+      <div class="score-legend">
+        <span><span class="sw" style="background:#2563eb;"></span>証拠充実度 {{ score.evidence_points }}pt</span>
+        <span><span class="sw" style="background:#60a5fa;"></span>稟議到達度 {{ score.governance_points }}pt</span>
+        <span><span class="sw" style="background:#bfdbfe;"></span>鮮度 {{ score.freshness_points }}pt</span>
+        {% if score.single_threaded %}<span style="color:#991b1b;">× シングルスレッド係数 0.7</span>{% endif %}
+      </div>
+      {% if score_reasons %}
+      <ul class="score-reasons">
+        {% for r in score_reasons %}<li>{{ r }}</li>{% endfor %}
+      </ul>
+      {% else %}
+      <p class="muted" style="margin:10px 0 0; font-size:12px;">減点要因はありません。</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- 最近の活動 -->
+<div class="card">
+  <h2>最近の活動</h2>
+  {% if recent_activity %}
+    <table>
+      <thead><tr><th>日時</th><th>種別</th><th>内容</th><th>誰が</th></tr></thead>
+      <tbody>
+        {% for item in recent_activity %}
+        <tr>
+          <td class="mono" style="font-size:11px;">{{ item.occurred_at.strftime("%Y-%m-%d %H:%M") }}</td>
+          <td>{{ item.title }}</td>
+          <td style="max-width:420px;">{{ item.detail }}</td>
+          <td class="muted">{{ item.actor or "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p style="margin-top:10px;"><a href="/ui/engagements/{{ engagement.id }}/activity">すべての活動を見る &rarr;</a></p>
+  {% else %}
+    <div class="empty-state">まだ活動記録がありません。</div>
+  {% endif %}
+</div>
+
+<!-- ステージ / ゲート -->
+<div class="card">
+  <h2>ステージ</h2>
+
+  {% if target_stage %}
+    {% if gate %}
+      <p>
+        次のステージ「<strong>{{ stage_labels.get(target_stage.value, target_stage.value) }}</strong>」への判定:
+        {% if gate.satisfied %}
+          <span class="badge badge-gate-ok">条件を満たしています</span>
+        {% elif gate.blocks_transition %}
+          <span class="badge badge-gate-block">ブロック中</span>
+        {% else %}
+          <span class="badge badge-gate-warn">警告あり(遷移は可能)</span>
+        {% endif %}
+      </p>
+
+      {% if gate.missing %}
+        <ul style="font-size:13px; padding-left:18px;">
+          {% for m in gate.missing %}
+            <li>{{ m.reason }}{% if m.play %} — <span class="muted">{{ m.play }}</span>{% endif %}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      {% if next_best_action %}
+        <p class="quote-box">次の一手: {{ next_best_action.play or next_best_action.reason }}</p>
+        <details style="margin-bottom:14px;">
+          <summary style="cursor:pointer; font-size:13px; color:#2563eb;">担当者にアサインする</summary>
+          <form method="post" action="/ui/engagements/{{ engagement.id }}/actions" style="margin-top:8px; max-width:320px;">
+            <label for="assigned_to">担当者名</label>
+            <input type="text" id="assigned_to" name="assigned_to" required placeholder="例: 佐藤 健">
+            <button type="submit" class="btn btn-sm">アサインする</button>
+          </form>
+        </details>
+      {% endif %}
+    {% endif %}
+
+    <form method="post" action="/ui/engagements/{{ engagement.id }}/stage" class="inline">
+      <input type="hidden" name="to_stage" value="{{ target_stage.value }}">
+      {% if matching_waiver %}<input type="hidden" name="waiver_id" value="{{ matching_waiver.id }}">{% endif %}
+      <button type="submit" class="btn" {% if gate and gate.blocks_transition and not matching_waiver %}disabled{% endif %}>
+        「{{ stage_labels.get(target_stage.value, target_stage.value) }}」へ進める{% if matching_waiver %}(Waiver 適用){% endif %}
+      </button>
+    </form>
+
+    {% if gate and gate.blocks_transition and policy and not matching_waiver %}
+    <details style="margin-top:12px;">
+      <summary style="cursor:pointer; font-size:13px; color:#991b1b;">Waiver を発行してブロックを解除する</summary>
+      <form method="post" action="/ui/engagements/{{ engagement.id }}/waivers" style="margin-top:10px; max-width:420px;">
+        <input type="hidden" name="policy_id" value="{{ policy.id }}">
+        <label for="waiver_reason">理由(コンプライアンス証跡として記録されます)</label>
+        <textarea id="waiver_reason" name="reason" required></textarea>
+        <button type="submit" class="btn btn-danger btn-sm">Waiver を発行</button>
+      </form>
+    </details>
+    {% endif %}
+  {% else %}
+    <p class="muted">これ以上進むステージがありません。</p>
+  {% endif %}
+
+  {% if engagement.stage not in ["closed_won", "closed_lost"] %}
+  <form method="post" action="/ui/engagements/{{ engagement.id }}/stage" style="margin-top:16px;"
+        onsubmit="return confirm('この案件を失注にしますか?');">
+    <input type="hidden" name="to_stage" value="closed_lost">
+    <button type="submit" class="btn btn-secondary btn-sm">失注にする</button>
+  </form>
+  {% endif %}
+
+  {% if waivers %}
+  <h2 style="margin-top:20px;">発行済み Waiver</h2>
+  <table>
+    <thead><tr><th>理由</th><th>承認日時</th></tr></thead>
+    <tbody>
+    {% for w in waivers %}
+      <tr><td>{{ w.reason }}</td><td>{{ w.approved_at.strftime("%Y-%m-%d %H:%M") }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<!-- アサイン済みのアクション -->
+{% if open_actions %}
+<div class="card">
+  <h2>アサイン済みのアクション({{ open_actions | length }}件)</h2>
+  {% for a in open_actions %}
+  <div style="border-top:1px solid #eee; padding:12px 0;">
+    <div><strong>{{ a.assigned_to }}</strong>
+      <span class="muted" style="font-size:12px;">に {{ a.created_at.strftime("%Y-%m-%d") }} アサイン</span></div>
+    <div style="font-size:13px; color:#374151; margin-top:4px;">{{ a.play or a.reason }}</div>
+    <div style="margin-top:8px; display:flex; gap:10px; align-items:start;">
+      <form method="post" action="/ui/engagements/{{ engagement.id }}/actions/{{ a.id }}/complete" class="inline">
+        <button type="submit" class="btn btn-sm">完了</button>
+      </form>
+      <form method="post" action="/ui/engagements/{{ engagement.id }}/actions/{{ a.id }}/dismiss" class="inline">
+        <button type="submit" class="btn btn-sm btn-secondary">却下</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- クオリフィケーション -->
+<div class="card">
+  <h2>クオリフィケーション状況(MEDDPICC / BANT)</h2>
+  <table>
+    <thead><tr><th>項目</th><th>値</th><th>根拠</th><th>証拠強度</th><th>失効日</th><th></th></tr></thead>
+    <tbody>
+      {% for row in criteria %}
+      <tr>
+        <td>{{ criterion_labels.get(row.criterion.value, row.criterion.value) }}</td>
+        <td>{% if row.slot %}{{ format_slot_value(row.slot.value) }}{% else %}<span class="muted">未入力</span>{% endif %}</td>
+        <td style="max-width:260px;">
+          {% if row.slot and row.slot.evidence_quote %}
+            <div class="quote-box" style="margin:0;">「{{ row.slot.evidence_quote }}」</div>
+          {% elif row.slot and row.slot.evidence_uri %}
+            <a href="{{ row.slot.evidence_uri }}" target="_blank" rel="noopener">証跡を開く</a>
+          {% else %}
+            <span class="muted">—</span>
+          {% endif %}
+          {% if row.slot and row.slot.asserted_at %}
+            <div class="muted" style="font-size:11px; margin-top:2px;">
+              {{ row.slot.asserted_at.strftime("%Y-%m-%d") }} / {{ row.slot.written_by or "—" }}
+            </div>
+          {% endif %}
+        </td>
+        <td>
+          {% if row.slot %}
+            <span class="badge badge-conf-{{ row.slot.confidence }}">{{ confidence_labels.get(row.slot.confidence, row.slot.confidence) }}</span>
+          {% else %}—{% endif %}
+        </td>
+        <td>{{ row.slot.decays_at.strftime("%Y-%m-%d") if row.slot and row.slot.decays_at else "—" }}</td>
+        <td>
+          {% if row.slot and row.slot.confidence != "verified" %}
+          <details>
+            <summary style="cursor:pointer; font-size:12px;">検証済みにする</summary>
+            <form method="post"
+                  action="/ui/engagements/{{ engagement.id }}/slots/{{ row.criterion.value }}/verify"
+                  style="margin-top:8px; min-width:280px;">
+              <label>方式</label>
+              <select name="method">
+                <option value="customer_document">顧客文書・発言(標準)</option>
+                <option value="manager_confirmation">上長確認(代替)</option>
+              </select>
+              <label>証跡の参照URI(顧客文書方式は必須)</label>
+              <input type="text" name="evidence_uri" placeholder="例: s3://bucket/customer-email.eml">
+              <label>備考(上長確認方式は必須)</label>
+              <textarea name="note" placeholder="誰がどう確認したか"></textarea>
+              <button type="submit" class="btn btn-sm">検証する</button>
+            </form>
+          </details>
+          {% elif row.slot %}
+            <span class="muted">検証済み</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- 提案承認 -->
+<div class="card">
+  <h2>この案件の提案待ち({{ pending_proposals | length }}件)</h2>
+  {% if pending_proposals %}
+    {% for p in pending_proposals %}
+    <div style="border-top:1px solid #eee; padding:12px 0;">
+      <div><strong>{{ criterion_labels.get(p.field_path.split(':')[-1], p.field_path) }}</strong>
+        <span class="muted">({{ p.target_type }} / model_score {{ "%.2f"|format(p.model_score) }})</span></div>
+      <div class="mono" style="font-size:12px; color:#374151; margin-top:4px;">{{ p.proposed_value }}</div>
+      {% if p.evidence_quote %}<div class="quote-box">「{{ p.evidence_quote }}」</div>{% endif %}
+      <div style="margin-top:8px;">
+        <form method="post" action="/ui/proposals/{{ p.id }}/accept" class="inline">
+          <input type="hidden" name="redirect_to" value="/ui/engagements/{{ engagement.id }}">
+          <button type="submit" class="btn btn-sm">承認</button>
+        </form>
+        <form method="post" action="/ui/proposals/{{ p.id }}/reject" class="inline">
+          <input type="hidden" name="redirect_to" value="/ui/engagements/{{ engagement.id }}">
+          <button type="submit" class="btn btn-sm btn-secondary">却下</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="empty-state">保留中の提案はありません。</div>
+  {% endif %}
+</div>
+
+<!-- 情報投入 -->
+<div class="card">
+  <h2>取り込んだ情報</h2>
+  <p><a href="/ui/sources/new?engagement_id={{ engagement.id }}" class="btn btn-sm">+ 情報を投入する</a></p>
+  {% if sources %}
+  <table>
+    <thead><tr><th>種別</th><th>投入日時</th><th>処理状況</th></tr></thead>
+    <tbody>
+      {% for s in sources %}
+      <tr>
+        <td>{{ source_kind_labels.get(s.kind, s.kind) }}</td>
+        <td>{{ s.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+        <td>{% if s.processed_at %}処理済み{% else %}<span class="muted">未処理</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">まだ情報が投入されていません。</div>
+  {% endif %}
+</div>
+
+<!-- 相関図 -->
+<div class="card">
+  <h2>バイヤー相関図</h2>
+  <p class="subtitle" style="margin-bottom:12px;">登場人物 {{ node_count }} 名</p>
+  <a href="/ui/engagements/{{ engagement.id }}/graph" class="btn btn-sm btn-secondary">相関図を見る</a>
+</div>
+{% endblock %}

@@ -86,6 +86,34 @@ def api_client(db_session, tenant_id):
         app.dependency_overrides.pop(deps.get_screening_port, None)
 
 
+@pytest.fixture
+def actor_id() -> uuid.UUID:
+    return uuid.uuid4()
+
+
+@pytest.fixture
+def ui_client(db_session, tenant_id, actor_id):
+    """SSR UI テスト用の TestClient。get_session を db_session に差し替え、
+    Cookie ベースの擬似セッション(tenant_id/actor_id)を既定で付与する。"""
+    from fastapi.testclient import TestClient
+
+    from crm_mvp.api import deps
+    from crm_mvp.api.app import app
+    from crm_mvp.api.web.session import ACTOR_COOKIE, TENANT_COOKIE
+
+    app.dependency_overrides[deps.get_session] = lambda: db_session
+    client = TestClient(
+        app,
+        cookies={TENANT_COOKIE: str(tenant_id), ACTOR_COOKIE: str(actor_id)},
+    )
+    try:
+        yield client
+    finally:
+        app.dependency_overrides.pop(deps.get_session, None)
+        app.dependency_overrides.pop(deps.get_extractor, None)
+        app.dependency_overrides.pop(deps.get_screening_port, None)
+
+
 def make_slot(
     criterion: Criterion,
     confidence: Confidence,

@@ -96,6 +96,9 @@ class ExtractionProposal(Base, UUIDPk, Timestamped, TenantScoped):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # 却下時に人が入れた正しい値。次の精度改善の教師データになる。
     corrected_value: Mapped[dict | None] = mapped_column(JSONB)
+    # 自動連携(Outlook/Teams等)由来の提案に対する担当者自身の判断・意図。
+    # 「抽出は合っているが実際はこうだった」を承認/却下と別に残す(単純なYES/NOに潰さない)。
+    rep_comment: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         Index("ix_proposal_pending", "engagement_id", "status"),

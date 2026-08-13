@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Compliance-aware Agentic CRM{% endblock %}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, "Hiragino Kaku Gothic ProN", "Helvetica Neue", Arial, sans-serif;
+      color: #1f2937;
+      background: #f5f6f8;
+    }
+    a { color: #2563eb; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ナビゲーション */
+    .topnav {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      padding: 0 20px;
+      height: 52px;
+      background: #111827;
+      color: #e5e7eb;
+    }
+    .topnav-brand { font-weight: 700; font-size: 14px; color: white; margin-right: 8px; }
+    .topnav a {
+      color: #cbd5e1;
+      font-size: 13px;
+      padding: 6px 10px;
+      border-radius: 6px;
+      position: relative;
+    }
+    .topnav a:hover { text-decoration: none; background: #1f2937; color: white; }
+    .topnav a.active { background: #2563eb; color: white; }
+    .topnav-spacer { flex: 1; }
+    .topnav-actor { font-size: 12px; color: #9ca3af; display: flex; align-items: center; gap: 8px; }
+    .badge-count {
+      display: inline-block;
+      min-width: 16px;
+      padding: 0 4px;
+      margin-left: 4px;
+      border-radius: 8px;
+      background: #dc2626;
+      color: white;
+      font-size: 10px;
+      line-height: 16px;
+      text-align: center;
+    }
+    .link-button {
+      background: none; border: none; color: #9ca3af; font-size: 12px;
+      cursor: pointer; padding: 0; text-decoration: underline;
+    }
+    .link-button:hover { color: white; }
+
+    /* フラッシュ */
+    .flash {
+      padding: 10px 20px;
+      font-size: 13px;
+      border-bottom: 1px solid transparent;
+    }
+    .flash-success { background: #f0fdf4; color: #166534; border-color: #bbf7d0; }
+    .flash-error { background: #fef2f2; color: #991b1b; border-color: #fecaca; }
+    .flash-info { background: #eff6ff; color: #1e40af; border-color: #bfdbfe; }
+
+    main.page { max-width: 1100px; margin: 0 auto; padding: 24px 20px 60px; }
+
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    h2 { font-size: 15px; margin: 0 0 10px; color: #374151; }
+    .subtitle { color: #6b7280; font-size: 13px; margin: 0 0 20px; }
+
+    .card {
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 16px 18px;
+      margin-bottom: 20px;
+    }
+
+    table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    th, td { text-align: left; padding: 8px 10px; border-top: 1px solid #eee; }
+    th { color: #6b7280; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .02em; }
+    tr:first-child td { border-top: none; }
+    tbody tr:hover { background: #fafafa; }
+
+    .badge {
+      display: inline-block; border-radius: 6px; padding: 2px 8px;
+      font-size: 11px; font-weight: 600; white-space: nowrap;
+    }
+    .badge-stage-lead, .badge-stage-prospect { background: #f3f4f6; color: #4b5563; }
+    .badge-stage-qualified, .badge-stage-proposal { background: #dbeafe; color: #1e40af; }
+    .badge-stage-negotiation { background: #fef3c7; color: #92400e; }
+    .badge-stage-closed_won { background: #dcfce7; color: #166534; }
+    .badge-stage-closed_lost { background: #fee2e2; color: #991b1b; }
+
+    .badge-conf-asserted { background: #f3f4f6; color: #6b7280; }
+    .badge-conf-corroborated { background: #e0f2fe; color: #0369a1; }
+    .badge-conf-verified { background: #dcfce7; color: #166534; }
+
+    .badge-gate-ok { background: #dcfce7; color: #166534; }
+    .badge-gate-warn { background: #fef3c7; color: #92400e; }
+    .badge-gate-block { background: #fee2e2; color: #991b1b; }
+
+    .th-hint {
+      display: inline-block; margin-left: 3px; width: 13px; height: 13px; line-height: 13px;
+      border-radius: 50%; background: #d1d5db; color: white; font-size: 9px; text-align: center;
+      cursor: help;
+    }
+
+    .score-badge {
+      display: inline-flex; align-items: center; font-family: ui-monospace, monospace;
+      font-weight: 700; border-radius: 6px; padding: 2px 9px; font-size: 13px;
+    }
+    .score-badge-high { background: #dcfce7; color: #166534; }
+    .score-badge-mid { background: #fef3c7; color: #92400e; }
+    .score-badge-low { background: #fee2e2; color: #991b1b; }
+
+    .score-hero { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+    .score-hero .score-num { font-size: 42px; font-weight: 800; font-family: ui-monospace, monospace; line-height: 1; }
+    .score-hero .score-num.score-badge-high { color: #166534; }
+    .score-hero .score-num.score-badge-mid { color: #92400e; }
+    .score-hero .score-num.score-badge-low { color: #991b1b; }
+    .score-hero-body { flex: 1; min-width: 220px; }
+    .score-bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: #f3f4f6; }
+    .score-bar span { display: block; height: 100%; }
+    .score-seg-evidence { background: #2563eb; }
+    .score-seg-governance { background: #60a5fa; }
+    .score-seg-freshness { background: #bfdbfe; }
+    .score-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; font-size: 11px; color: #6b7280; }
+    .score-legend .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+    .score-reasons { margin: 12px 0 0; padding-left: 18px; font-size: 13px; color: #4b5563; }
+    .score-reasons li { margin-bottom: 4px; }
+
+    .btn {
+      display: inline-block;
+      padding: 7px 14px;
+      border: none;
+      border-radius: 6px;
+      background: #2563eb;
+      color: white;
+      font-size: 13px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .btn:hover { background: #1d4ed8; }
+    .btn-secondary { background: #6b7280; }
+    .btn-secondary:hover { background: #4b5563; }
+    .btn-danger { background: #dc2626; }
+    .btn-danger:hover { background: #b91c1c; }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+    form.inline { display: inline; }
+
+    label { display: block; font-size: 12px; color: #555; margin-bottom: 4px; font-weight: 600; }
+    input[type=text], input[type=url], textarea, select {
+      width: 100%;
+      font-size: 13px;
+      padding: 7px 9px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-family: inherit;
+      margin-bottom: 14px;
+    }
+    textarea { resize: vertical; min-height: 90px; }
+    .field-row { display: flex; gap: 16px; }
+    .field-row > * { flex: 1; }
+
+    .empty-state { color: #9ca3af; font-size: 13px; padding: 30px 0; text-align: center; }
+    .muted { color: #9ca3af; }
+    .mono { font-family: ui-monospace, monospace; font-size: 12px; }
+
+    .quote-box {
+      background: #f9fafb; border-left: 3px solid #d1d5db;
+      padding: 8px 10px; font-size: 12px; color: #4b5563; margin: 6px 0;
+    }
+  </style>
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+  {% if ui_session %}
+  <nav class="topnav">
+    <span class="topnav-brand">Agentic CRM</span>
+    <a href="/ui/" class="{% if active_nav == 'dashboard' %}active{% endif %}">ダッシュボード</a>
+    <a href="/ui/proposals" class="{% if active_nav == 'proposals' %}active{% endif %}">
+      提案承認{% if pending_count %}<span class="badge-count">{{ pending_count }}</span>{% endif %}
+    </a>
+    <a href="/ui/forecast-risk" class="{% if active_nav == 'forecast_risk' %}active{% endif %}">リスクレーダー</a>
+    <a href="/ui/engagements/new" class="{% if active_nav == 'new' %}active{% endif %}">+ 新規案件</a>
+    <div class="topnav-spacer"></div>
+    <div class="topnav-actor">
+      <span>{{ ui_session.actor_name or "匿名ユーザー" }}</span>
+      <span class="mono">tenant: {{ ui_session.tenant_id|string }}</span>
+      <form class="inline" method="post" action="/ui/workspace/logout">
+        <button type="submit" class="link-button">切替</button>
+      </form>
+    </div>
+  </nav>
+  {% endif %}
+
+  {% if flash_message %}
+  <div class="flash flash-{{ flash_type or 'info' }}">{{ flash_message }}</div>
+  {% endif %}
+
+  <main class="page">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

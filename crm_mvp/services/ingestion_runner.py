@@ -100,7 +100,7 @@ def process_source(
     for row in proposal_rows:
         row["tenant_id"] = tenant_id
     policies = _load_policies(session, tenant_id, proposal_rows)
-    outcome = route_proposals(proposal_rows, policies)
+    outcome = route_proposals(proposal_rows, policies, source_kind=source.kind)
 
     persisted: list[ExtractionProposal] = []
     for row in proposal_rows:

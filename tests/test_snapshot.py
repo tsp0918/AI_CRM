@@ -1,37 +1,34 @@
-"""PipelineSnapshot 日次バッチのテスト(HANDOVER.md §5 item18)。"""
+"""PipelineSnapshot 日次バッチのテスト(HANDOVER.md §5 item18)。
+
+§7.5 解消により evidence_score は confidence_score.py のスコアを
+100 で正規化した値になった。数式そのものは test_confidence_score.py で
+検証済みのため、ここでは配線(compute_evidence_score / create_daily_snapshots
+が正しく confidence_score を呼び、DB に反映すること)だけを確認する。
+"""
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta, timezone
+import uuid
 
-from crm_mvp.enums import Confidence, Criterion, Stage
+from crm_mvp.enums import AccessLevel, Confidence, Criterion, Stage
 from crm_mvp.models import PipelineSnapshot, QualificationSlot
+from crm_mvp.services import confidence_score as cs
 from crm_mvp.services.snapshot import compute_evidence_score, create_daily_snapshots
 
 from .conftest import create_account_and_engagement, make_slot
 
 
 class TestComputeEvidenceScore:
-    def test_no_slots_scores_zero(self):
-        assert compute_evidence_score([]) == 0.0
+    def test_no_data_scores_zero(self):
+        assert compute_evidence_score({}, {}, [], {}) == 0.0
 
-    def test_all_verified_scores_one(self):
-        slots = [make_slot(Criterion.BUDGET, Confidence.VERIFIED)]
-        assert compute_evidence_score(slots) == 1.0
-
-    def test_mixed_confidence_averages(self):
-        slots = [
-            make_slot(Criterion.BUDGET, Confidence.ASSERTED),
-            make_slot(Criterion.TIMING, Confidence.VERIFIED),
-        ]
-        # (1 + 3) / (2 * 3) = 4/6
-        assert compute_evidence_score(slots) == 4 / 6
-
-    def test_expired_slots_are_excluded(self):
-        past = date.today() - timedelta(days=1)
-        past_dt = datetime.combine(past, time(), tzinfo=timezone.utc)
-        slots = [make_slot(Criterion.BUDGET, Confidence.VERIFIED, decays_at=past_dt)]
-        assert compute_evidence_score(slots) == 0.0
+    def test_matches_confidence_score_normalized_by_100(self):
+        slots = {
+            Criterion.BUDGET: make_slot(Criterion.BUDGET, Confidence.VERIFIED),
+        }
+        roles = {uuid.uuid4(): {"access_level": AccessLevel.ENGAGED, "roles": []}}
+        expected = cs.compute_confidence_score(slots, {}, [], roles).total / 100.0
+        assert compute_evidence_score(slots, {}, [], roles) == expected
 
 
 class TestCreateDailySnapshots:
@@ -51,7 +48,7 @@ class TestCreateDailySnapshots:
             tenant_id=tenant_id, engagement_id=engagement.id,
         ).one()
         assert snapshot.stage == "proposal"
-        assert snapshot.evidence_score == 2 / 3
+        assert 0.0 < snapshot.evidence_score <= 1.0
 
     def test_closed_engagements_are_skipped(self, db_session, tenant_id):
         create_account_and_engagement(db_session, tenant_id, Stage.CLOSED_WON)

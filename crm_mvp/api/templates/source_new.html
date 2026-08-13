@@ -1,0 +1,54 @@
+{% extends "_base.html" %}
+
+{% block title %}情報投入 | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<h1>情報を投入する</h1>
+<p class="subtitle">
+  トランスクリプト・メモ・メールなど、入れる場所はここ1つだけです(§3.9)。
+  投入すると自動的に抽出処理が実行され、提案が生成されます。
+</p>
+
+{% if not engagements %}
+<div class="card">
+  <div class="empty-state">
+    先に <a href="/ui/engagements/new">+ 新規案件</a> を作成してください。
+  </div>
+</div>
+{% else %}
+<div class="card" style="max-width: 600px;">
+  <form method="post" action="/ui/sources/new">
+    <label for="engagement_id">案件</label>
+    <select id="engagement_id" name="engagement_id" required>
+      <option value="">選択してください</option>
+      {% for e in engagements %}
+      <option value="{{ e.id }}" {% if preselected_engagement_id == e.id|string %}selected{% endif %}>{{ e.name }}</option>
+      {% endfor %}
+    </select>
+
+    <label for="kind">種別</label>
+    <select id="kind" name="kind" onchange="document.getElementById('attendees-field').style.display = (this.value === 'calendar_sync') ? 'block' : 'none';">
+      <option value="free_note">自由メモ</option>
+      <option value="transcript">トランスクリプト</option>
+      <option value="email">メール</option>
+      <option value="calendar_sync">会議同期(Outlook/Teams)</option>
+    </select>
+
+    <label for="raw_text">本文</label>
+    <textarea id="raw_text" name="raw_text" required style="min-height:220px;"
+              placeholder="商談の文字起こしやメモをそのまま貼り付けてください"></textarea>
+
+    <div id="attendees-field" style="display:none;">
+      <label for="attendees">出席者(1行に1名。「氏名, メールアドレス」。メールは任意)</label>
+      <textarea id="attendees" name="attendees" style="min-height:90px;"
+                placeholder="山田 太郎, yamada@example.com&#10;鈴木 花子"></textarea>
+      <p class="muted" style="font-size:12px; margin:-6px 0 14px;">
+        実際のOutlook/Teams連携ではここが自動入力されます。未登録の出席者は相関図にプレースホルダーとして追加されます。
+      </p>
+    </div>
+
+    <button type="submit" class="btn">投入して処理する</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

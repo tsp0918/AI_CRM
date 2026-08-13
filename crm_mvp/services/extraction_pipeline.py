@@ -143,13 +143,19 @@ def to_proposals(
 def route_proposals(
     proposals: list[dict],
     policies: dict[tuple[str, str], "FieldAutonomyPolicyLike"],
+    *, source_kind: SourceKind | None = None,
 ) -> ApplyOutcome:
     """自動適用か確認待ちかを振り分ける。
 
     ここで人が「AIにどこまで任せるか」を数値で決める必要はない。
     フィールドごとの承認率実績が閾値を超えたものから順に自動化されていく。
+
+    ただし CALENDAR_SYNC(Outlook/Teams 等の自動連携)由来の提案は、
+    その連携チャネル自体の承認実績がまだ無いため、フィールド側の
+    自動適用ポリシーに関わらず常に確認待ちにする。
     """
     outcome = ApplyOutcome()
+    force_confirm = source_kind == SourceKind.CALENDAR_SYNC
     for p in proposals:
         policy = policies.get((p["target_type"], p["field_path"]))
         if policy is None:
@@ -162,12 +168,12 @@ def route_proposals(
         if policy.mode == AutonomyMode.NEVER_AI:
             outcome.discarded += 1
             continue
-        if policy.should_auto_apply(p["model_score"]):
-            p["status"] = ProposalStatus.AUTO_APPLIED
-            outcome.auto_applied += 1
-        else:
+        if force_confirm or not policy.should_auto_apply(p["model_score"]):
             p["status"] = ProposalStatus.PENDING
             outcome.pending += 1
+        else:
+            p["status"] = ProposalStatus.AUTO_APPLIED
+            outcome.auto_applied += 1
     return outcome
 
 

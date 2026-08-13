@@ -1,0 +1,64 @@
+{% extends "_base.html" %}
+
+{% block title %}提案承認 | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<h1>提案承認インボックス</h1>
+<p class="subtitle">
+  AI が抽出した内容はここで確認・承認するまで業務データに反映されません(§3.1)。
+  {{ proposals | length }} 件が確認待ちです。
+</p>
+
+{% if proposals %}
+  {% for p in proposals %}
+  {% set engagement = engagements.get(p.engagement_id) %}
+  {% set from_calendar_sync = source_kinds.get(p.source_id) == calendar_sync %}
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:baseline;">
+      <div>
+        <strong>{{ criterion_labels.get(p.field_path.split(':')[-1], p.field_path) }}</strong>
+        <span class="muted">({{ p.target_type }} / {{ p.field_path }})</span>
+        {% if from_calendar_sync %}<span class="badge" style="background:#e0f2fe;color:#0369a1;">会議同期由来</span>{% endif %}
+      </div>
+      <span class="muted" style="font-size:12px;">model_score {{ "%.2f"|format(p.model_score) }}</span>
+    </div>
+    {% if engagement %}
+    <p class="subtitle" style="margin: 4px 0 10px;">
+      <a href="/ui/engagements/{{ engagement.id }}">{{ engagement.name }}</a>
+    </p>
+    {% endif %}
+
+    <div class="mono" style="font-size:12px; color:#374151; margin-bottom:6px;">{{ p.proposed_value }}</div>
+    {% if p.rationale %}<p style="font-size:13px; color:#4b5563;">{{ p.rationale }}</p>{% endif %}
+    {% if p.evidence_quote %}<div class="quote-box">「{{ p.evidence_quote }}」</div>{% endif %}
+
+    <div style="margin-top:12px; display:flex; gap:10px; align-items:start;">
+      <form method="post" action="/ui/proposals/{{ p.id }}/accept" style="min-width:280px;">
+        <input type="hidden" name="redirect_to" value="/ui/proposals">
+        {% if from_calendar_sync %}
+        <label>担当者コメント(任意・「抽出は合っているが実際はこうだった」等)</label>
+        <textarea name="rep_comment" style="min-height:50px;"></textarea>
+        {% endif %}
+        <button type="submit" class="btn">承認</button>
+      </form>
+      <details>
+        <summary style="cursor:pointer; font-size:13px; color:#6b7280; padding-top:7px;">却下(訂正値を残す)</summary>
+        <form method="post" action="/ui/proposals/{{ p.id }}/reject" style="margin-top:8px; min-width:280px;">
+          <input type="hidden" name="redirect_to" value="/ui/proposals">
+          <label>訂正値(任意・JSON形式)</label>
+          <textarea name="corrected_value" placeholder='例: {"amount": 5000000}'></textarea>
+          <label>担当者コメント(任意)</label>
+          <textarea name="rep_comment" style="min-height:50px;"></textarea>
+          <button type="submit" class="btn btn-secondary btn-sm">却下する</button>
+        </form>
+      </details>
+    </div>
+    {% if p.rep_comment %}<div class="quote-box" style="border-left-color:#2563eb;">担当者コメント: {{ p.rep_comment }}</div>{% endif %}
+  </div>
+  {% endfor %}
+{% else %}
+  <div class="card">
+    <div class="empty-state">保留中の提案はありません。</div>
+  </div>
+{% endif %}
+{% endblock %}

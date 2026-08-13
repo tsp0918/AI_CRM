@@ -2,7 +2,7 @@ from .party import Account, Contact, ComplianceStatus
 from .engagement import Engagement, StageTransition, PipelineSnapshot
 from .qualification import QualificationSlot
 from .buying_center import GraphNode, GraphEdge, EngagementRole
-from .gate import GatePolicy, GateEvaluation, Waiver
+from .gate import ActionItem, GatePolicy, GateEvaluation, Waiver
 from .ingestion import IngestionSource, ExtractionProposal, FieldAutonomyPolicy
 
 __all__ = [
@@ -10,6 +10,6 @@ __all__ = [
     "Engagement", "StageTransition", "PipelineSnapshot",
     "QualificationSlot",
     "GraphNode", "GraphEdge", "EngagementRole",
-    "GatePolicy", "GateEvaluation", "Waiver",
+    "GatePolicy", "GateEvaluation", "Waiver", "ActionItem",
     "IngestionSource", "ExtractionProposal", "FieldAutonomyPolicy",
 ]

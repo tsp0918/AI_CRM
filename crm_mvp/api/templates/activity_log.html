@@ -1,0 +1,63 @@
+{% extends "_base.html" %}
+
+{% block title %}活動ログ — {{ engagement.name }} | Compliance-aware Agentic CRM{% endblock %}
+
+{% block extra_head %}
+<style>
+  .timeline { position: relative; }
+  .timeline-item {
+    position: relative; padding-bottom: 22px; border-left: 2px solid #e5e7eb;
+    padding-left: 20px; margin-left: 4px;
+  }
+  .timeline-item:last-child { border-left-color: transparent; padding-bottom: 0; }
+  .timeline-dot {
+    position: absolute; left: -7px; top: 3px; width: 12px; height: 12px;
+    border-radius: 50%; border: 2px solid white;
+  }
+  .kind-stage_transition .timeline-dot { background: #2563eb; }
+  .kind-proposal .timeline-dot { background: #8b5cf6; }
+  .kind-waiver .timeline-dot { background: #dc2626; }
+  .kind-verification .timeline-dot { background: #16a34a; }
+  .kind-source .timeline-dot { background: #6b7280; }
+  .timeline-meta { font-size: 11px; color: #9ca3af; margin-bottom: 2px; }
+  .timeline-title { font-weight: 600; font-size: 13px; }
+  .timeline-detail { font-size: 13px; color: #4b5563; margin-top: 3px; word-break: break-word; }
+  .kind-legend { display: flex; gap: 16px; font-size: 12px; color: #6b7280; margin-bottom: 16px; }
+  .kind-legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .kind-legend i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+</style>
+{% endblock %}
+
+{% block content %}
+<p><a href="/ui/engagements/{{ engagement.id }}">&larr; {{ engagement.name }} に戻る</a></p>
+<h1>活動ログ</h1>
+<p class="subtitle">{{ account.name if account else "—" }} / {{ engagement.name }} — 何が・いつ・誰によって変わったかの記録</p>
+
+<div class="kind-legend">
+  <span><i style="background:#2563eb;"></i>ステージ変更</span>
+  <span><i style="background:#8b5cf6;"></i>AI提案</span>
+  <span><i style="background:#16a34a;"></i>VERIFIED昇格</span>
+  <span><i style="background:#dc2626;"></i>Waiver</span>
+  <span><i style="background:#6b7280;"></i>情報投入</span>
+</div>
+
+<div class="card">
+  {% if activity %}
+  <div class="timeline">
+    {% for item in activity %}
+    <div class="timeline-item kind-{{ item.kind }}">
+      <span class="timeline-dot"></span>
+      <div class="timeline-meta">
+        {{ item.occurred_at.strftime("%Y-%m-%d %H:%M") }}
+        {% if item.actor %} — {{ item.actor }}{% endif %}
+      </div>
+      <div class="timeline-title">{{ item.title }}</div>
+      <div class="timeline-detail">{{ item.detail }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">まだ活動記録がありません。</div>
+  {% endif %}
+</div>
+{% endblock %}

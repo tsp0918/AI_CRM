@@ -409,6 +409,29 @@ class TestEvaluateGateQualified:
         assert result.satisfied is True
 
 
+class TestEvaluateGateDefaultNowIsTimezoneAware:
+    """回帰テスト: evaluate_gate の既定 now が naive だと、tz-aware な
+    decays_at(decay_policy.compute_decays_at が返す値)との比較で
+    TypeError になっていた。now を明示せずに呼んでも落ちないことを確認する。
+    """
+
+    def test_does_not_raise_with_real_tz_aware_decays_at(self):
+        from crm_mvp.services.decay_policy import compute_decays_at
+
+        policy = policy_by_code("stage.qualified")
+        future_decay = compute_decays_at(Criterion.IDENTIFIED_PAIN)
+        slots = {
+            Criterion.IDENTIFIED_PAIN: make_slot(
+                Criterion.IDENTIFIED_PAIN, Confidence.ASSERTED,
+                decays_at=future_decay,
+            ),
+            Criterion.TIMING: make_slot(Criterion.TIMING, Confidence.ASSERTED),
+        }
+        # now を渡さない(=evaluate_gate 内部の既定値が使われる)経路を検証する。
+        result = ge.evaluate_gate(policy, slots, {}, [], {}, {})
+        assert result.satisfied is True
+
+
 class TestEvaluateGateMinEngagedContacts:
     def test_single_threaded_deal_is_flagged_missing(self):
         policy = policy_by_code("stage.proposal")

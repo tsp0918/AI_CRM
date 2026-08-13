@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from ..enums import (
     AccessLevel, BuyingCenterRole, Confidence, Criterion, EdgeType,
@@ -158,8 +158,7 @@ def derive_close_date(
     担当者の希望日ではなく、決裁構造から導かれる日付。
     経営が信用できる着地予測はここから生まれる。
     """
-    from datetime import timedelta
-    base = from_date or datetime.now()
+    base = from_date or datetime.now(timezone.utc)
     days = approval_layers * lead_time_per_layer_days + legal_review_days
     return base + timedelta(days=days)
 
@@ -197,7 +196,9 @@ def evaluate_gate(
     compliance: dict[str, dict],
     now: datetime | None = None,
 ) -> GateResult:
-    now = now or datetime.now()
+    # decays_at は timezone-aware(§7.1 decay_policy.compute_decays_at)なので、
+    # 既定値も aware にしないと比較時に TypeError になる。
+    now = now or datetime.now(timezone.utc)
     missing: list[MissingItem] = []
 
     for cond in policy["conditions"].get("slots", []):
@@ -205,7 +206,10 @@ def evaluate_gate(
         required = Confidence(cond.get("min_confidence", "asserted"))
         slot = slots.get(criterion)
         if slot is None or not slot.meets(required, now):
-            have = slot.confidence.value if slot else "未入力"
+            # DB から読んだ slot.confidence はプレーンな str になりうるため
+            # `.value` を呼ばない(StrEnum インスタンスでも plain str でも
+            # そのまま文字列として使える)。
+            have = slot.confidence if slot else "未入力"
             missing.append(MissingItem(
                 target_type="qualification_slot",
                 field_path=f"criterion:{criterion.value}",

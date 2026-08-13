@@ -1,0 +1,42 @@
+{% extends "_base.html" %}
+
+{% block title %}ダッシュボード | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<h1>ダッシュボード</h1>
+<p class="subtitle">{{ rows | length }} 件の案件</p>
+
+{% if rows %}
+<div class="card" style="padding:0;">
+  <table>
+    <thead>
+      <tr>
+        <th>案件名</th><th>取引先</th><th>ステージ</th>
+        <th>確度スコア<span class="th-hint" title="証拠充実度・稟議到達度・鮮度から機械的に算出(担当者は編集不可)">?</span></th>
+        <th>金額</th>
+        <th>クローズ想定日</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td><a href="/ui/engagements/{{ row.engagement.id }}">{{ row.engagement.name }}</a></td>
+        <td>{{ row.account_name }}</td>
+        <td><span class="badge badge-stage-{{ row.engagement.stage }}">{{ stage_labels.get(row.engagement.stage, row.engagement.stage) }}</span></td>
+        <td><span class="score-badge score-badge-{{ row.score.band }}">{{ row.score.total }}</span></td>
+        <td>{% if row.engagement.amount %}{{ "{:,.0f}".format(row.engagement.amount) }} {{ row.engagement.currency }}{% else %}—{% endif %}</td>
+        <td>{{ row.engagement.derived_close_date or row.engagement.expected_close_date or "—" }}</td>
+        <td><a href="/ui/engagements/{{ row.engagement.id }}">詳細 &rarr;</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card">
+  <div class="empty-state">
+    まだ案件がありません。<a href="/ui/engagements/new">+ 新規案件</a> から作成してください。
+  </div>
+</div>
+{% endif %}
+{% endblock %}

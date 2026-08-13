@@ -8,7 +8,7 @@ import uuid
 
 import pytest
 
-from crm_mvp.enums import AutonomyMode, Confidence, ProposalStatus
+from crm_mvp.enums import AutonomyMode, Confidence, ProposalStatus, SourceKind
 from crm_mvp.schemas.extraction import ExtractedClaim, ExtractionResult
 from crm_mvp.services import extraction_pipeline as ep
 
@@ -130,6 +130,39 @@ class TestRouteProposals:
                     _Policy(AutonomyMode.AUTO_IF_TRUSTED, auto=False)}
         outcome = ep.route_proposals(proposals, policies)
         assert outcome.pending == 1
+
+    def test_calendar_sync_forces_confirm_even_when_field_would_auto_apply(self):
+        # Outlook/Teams 連携由来の提案は、フィールド側の実績に関わらず
+        # 常に確認待ちにする(連携チャネル自体の承認実績がまだ無いため)。
+        proposals = [{"target_type": "engagement_role", "field_path": "access_level",
+                      "model_score": 0.95}]
+        policies = {("engagement_role", "access_level"):
+                    _Policy(AutonomyMode.ALWAYS_AUTO, auto=True)}
+        outcome = ep.route_proposals(
+            proposals, policies, source_kind=SourceKind.CALENDAR_SYNC,
+        )
+        assert outcome.pending == 1
+        assert outcome.auto_applied == 0
+        assert proposals[0]["status"] == ProposalStatus.PENDING
+
+    def test_calendar_sync_still_discards_never_ai_fields(self):
+        proposals = [{"target_type": "engagement", "field_path": "stage",
+                      "model_score": 0.99}]
+        policies = {("engagement", "stage"): _Policy(AutonomyMode.NEVER_AI)}
+        outcome = ep.route_proposals(
+            proposals, policies, source_kind=SourceKind.CALENDAR_SYNC,
+        )
+        assert outcome.discarded == 1
+
+    def test_non_calendar_source_kind_is_unaffected(self):
+        proposals = [{"target_type": "engagement_role", "field_path": "access_level",
+                      "model_score": 0.95}]
+        policies = {("engagement_role", "access_level"):
+                    _Policy(AutonomyMode.ALWAYS_AUTO, auto=True)}
+        outcome = ep.route_proposals(
+            proposals, policies, source_kind=SourceKind.TRANSCRIPT,
+        )
+        assert outcome.auto_applied == 1
 
 
 class TestRecomputeAcceptRate:

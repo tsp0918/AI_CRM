@@ -1,0 +1,37 @@
+{% extends "_base.html" %}
+
+{% block title %}ワークスペース切替 | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 480px; margin: 40px auto;">
+  <h1>Compliance-aware Agentic CRM</h1>
+  <p class="subtitle">
+    認証基盤は未実装の MVP です。Tenant ID を指定してワークスペースに入ってください。
+  </p>
+
+  {% if error %}
+  <div class="flash flash-error" style="margin: 0 0 14px; border-radius: 6px;">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="/ui/workspace">
+    <label for="tenant_id">Tenant ID</label>
+    <input type="text" id="tenant_id" name="tenant_id" class="mono" required
+           value="{{ current.tenant_id if current else '' }}"
+           placeholder="00000000-0000-0000-0000-000000000001">
+
+    <label for="actor_name">表示名(任意・操作の記録に使われます)</label>
+    <input type="text" id="actor_name" name="actor_name"
+           value="{{ current.actor_name if current else '' }}" placeholder="例: 田中">
+
+    <input type="hidden" name="next" value="{{ next }}">
+    <button type="submit" class="btn">ワークスペースに入る</button>
+  </form>
+
+  {% if not current %}
+  <p class="subtitle" style="margin-top:16px;">
+    お試し用の Tenant ID: <code class="mono">00000000-0000-0000-0000-0000000000aa</code>
+    (デモ案件が1件入っています)
+  </p>
+  {% endif %}
+</div>
+{% endblock %}

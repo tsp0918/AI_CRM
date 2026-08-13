@@ -1,0 +1,20 @@
+{% extends "_base.html" %}
+
+{% block title %}新規案件 | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<h1>新規案件</h1>
+<p class="subtitle">取引先と案件を作成します。ステージは自動的に「リード」から始まります。</p>
+
+<div class="card" style="max-width: 480px;">
+  <form method="post" action="/ui/engagements/new">
+    <label for="account_name">取引先名</label>
+    <input type="text" id="account_name" name="account_name" required placeholder="例: 山田製作所株式会社">
+
+    <label for="engagement_name">案件名</label>
+    <input type="text" id="engagement_name" name="engagement_name" required placeholder="例: 検査装置更新案件">
+
+    <button type="submit" class="btn">作成する</button>
+  </form>
+</div>
+{% endblock %}
