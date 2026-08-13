@@ -362,6 +362,50 @@ class TestQuickNote:
         assert "自分の案件" in own_section
         assert "他人の案件" not in own_section
 
+    def test_owner_select_shows_all_users_and_marks_selected(
+        self, ui_client, db_session, tenant_id,
+    ):
+        from crm_mvp.models import User
+
+        owner = User(
+            tenant_id=tenant_id, name="担当B", email="qn-b@example.com",
+            function="Sales", role="AM",
+        )
+        db_session.add(owner)
+        db_session.flush()
+        create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        resp = ui_client.get(f"/ui/quick-note?owner_user_id={owner.id}")
+        assert resp.status_code == 200
+        assert 'id="owner_user_id"' in resp.text
+        assert f'<option value="{owner.id}" selected>担当B</option>' in resp.text
+
+    def test_post_redirect_preserves_owner_user_id(
+        self, ui_client, db_session, tenant_id,
+    ):
+        from crm_mvp.models import User
+
+        owner = User(
+            tenant_id=tenant_id, name="担当C", email="qn-c@example.com",
+            function="Sales", role="CS",
+        )
+        db_session.add(owner)
+        db_session.flush()
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        resp = ui_client.post(
+            "/ui/quick-note",
+            data={
+                "engagement_id": str(engagement.id), "raw_text": "電話メモ",
+                "owner_user_id": str(owner.id),
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert resp.headers["location"].startswith(f"/ui/quick-note?owner_user_id={owner.id}")
+
 
 class TestProposalInbox:
     def _make_pending_proposal(self, db_session, tenant_id, engagement):

@@ -18,6 +18,7 @@ from ...enums import SourceKind
 from ...models import Engagement, IngestionSource
 from ...ports.extractor import ExtractorPort
 from ...services.ingestion_runner import process_source
+from ...services.users import list_users
 from ..deps import get_extractor
 from .common import base_context, redirect_with_flash
 from .session import UiSession, get_ui_db_session, require_ui_session
@@ -160,14 +161,20 @@ def quick_note_form(
     context.update({
         "own_engagements": own_engagements, "other_engagements": other_engagements,
         "preselected_engagement_id": engagement_id,
+        "users": list_users(session, ui_session.tenant_id), "owner_user_id": owner_user_id,
     })
     return templates.TemplateResponse(request, "quick_note.html", context)
+
+
+def _quick_note_url(owner_user_id: str) -> str:
+    return f"/ui/quick-note?owner_user_id={owner_user_id}" if owner_user_id else "/ui/quick-note"
 
 
 @router.post("/ui/quick-note")
 def quick_note_submit(
     engagement_id: str = Form(...),
     raw_text: str = Form(""),
+    owner_user_id: str = Form(""),
     ui_session: UiSession = Depends(require_ui_session),
     session: Session = Depends(get_ui_db_session),
     extractor: ExtractorPort = Depends(get_extractor),
@@ -177,9 +184,11 @@ def quick_note_submit(
     if engagement is None or engagement.tenant_id != ui_session.tenant_id:
         raise HTTPException(status_code=404, detail="engagement not found")
 
+    redirect_url = _quick_note_url(owner_user_id)
+
     if not raw_text.strip():
         return redirect_with_flash(
-            "/ui/quick-note", "本文を入力してください", "error",
+            redirect_url, "本文を入力してください", "error",
         )
 
     source = IngestionSource(
@@ -193,8 +202,8 @@ def quick_note_submit(
         outcome = process_source(session, ui_session.tenant_id, source, extractor=extractor)
     except ValueError as exc:
         session.rollback()
-        return redirect_with_flash("/ui/quick-note", f"処理に失敗しました: {exc}", "error")
+        return redirect_with_flash(redirect_url, f"処理に失敗しました: {exc}", "error")
     session.commit()
 
     message = f"{engagement.name} にメモを記録しました({outcome.claims}件抽出)"
-    return redirect_with_flash("/ui/quick-note", message)
+    return redirect_with_flash(redirect_url, message)
