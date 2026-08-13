@@ -1,0 +1,103 @@
+{% extends "_base.html" %}
+
+{% block title %}ERP取引先マスタ | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<h1>ERP取引先マスタ</h1>
+<p class="subtitle">
+  ERPの取引先マスタ(BusinessPartner)を受け止める「箱」です。案件作成時にここから取引先を選び、
+  Account の外部連携キー(external_system=erp / external_id=bp_code)で紐付けます。
+</p>
+
+{% if partners %}
+<div class="card" style="padding:0;">
+  <table>
+    <thead>
+      <tr><th>取引先コード</th><th>名称</th><th>国</th><th>役割</th><th>通貨</th><th>与信限度額</th><th>状態</th></tr>
+    </thead>
+    <tbody>
+      {% for p in partners %}
+      <tr>
+        <td class="mono">{{ p.bp_code }}</td>
+        <td>{{ p.name }}{% if p.city %}<div class="muted" style="font-size:12px;">{{ p.city }}</div>{% endif %}</td>
+        <td class="mono">{{ p.country or "—" }}</td>
+        <td>{{ p.roles }}</td>
+        <td class="mono">{{ p.currency or "—" }}</td>
+        <td class="mono">{% if p.credit_limit %}{{ "{:,.0f}".format(p.credit_limit) }}{% else %}—{% endif %}</td>
+        <td>
+          {% if p.is_denied_party %}<span class="badge badge-gate-block">取引制限</span>
+          {% elif p.is_active %}<span class="badge badge-gate-ok">有効</span>
+          {% else %}<span class="muted">無効</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card"><div class="empty-state">まだ取引先が取り込まれていません。下のフォームから取り込んでください。</div></div>
+{% endif %}
+
+<div class="card">
+  <h2>+ ERP取引先を取り込む</h2>
+  <p class="subtitle" style="margin-bottom:12px;">
+    同じ取引先コードで再取込すると内容が上書き更新されます(アップサート)。
+  </p>
+  <form method="post" action="/ui/erp-business-partners/import">
+    <div class="field-row">
+      <div>
+        <label for="bp_code">取引先コード</label>
+        <input type="text" id="bp_code" name="bp_code" required placeholder="例: BP-3000001">
+      </div>
+      <div>
+        <label for="bp_type">種別</label>
+        <select id="bp_type" name="bp_type">
+          <option value="ORG">ORG(法人)</option>
+          <option value="PERSON">PERSON(個人)</option>
+        </select>
+      </div>
+    </div>
+    <label for="name">取引先名称</label>
+    <input type="text" id="name" name="name" required placeholder="例: Apex Foundry Corporation">
+    <div class="field-row">
+      <div>
+        <label for="country">国コード(ISO 3166-1 alpha-2)</label>
+        <input type="text" id="country" name="country" placeholder="例: TW">
+      </div>
+      <div>
+        <label for="roles">役割(カンマ区切り可)</label>
+        <input type="text" id="roles" name="roles" value="CUSTOMER" placeholder="CUSTOMER / VENDOR">
+      </div>
+    </div>
+    <div class="field-row">
+      <div>
+        <label for="city">都市(任意)</label>
+        <input type="text" id="city" name="city">
+      </div>
+      <div>
+        <label for="email">メール(任意)</label>
+        <input type="text" id="email" name="email">
+      </div>
+    </div>
+    <div class="field-row">
+      <div>
+        <label for="credit_limit">与信限度額(任意)</label>
+        <input type="text" id="credit_limit" name="credit_limit" placeholder="例: 20000000">
+      </div>
+      <div>
+        <label for="currency">通貨(任意)</label>
+        <input type="text" id="currency" name="currency" placeholder="例: USD">
+      </div>
+      <div>
+        <label for="payment_terms">支払条件(任意)</label>
+        <input type="text" id="payment_terms" name="payment_terms" placeholder="例: NET30">
+      </div>
+    </div>
+    <label style="display:flex; align-items:center; gap:6px; font-weight:normal; margin-top:8px;">
+      <input type="checkbox" name="is_denied_party" value="true" style="width:auto;">
+      取引制限あり(ERP側のスクリーニングでブロック済み)
+    </label>
+    <button type="submit" class="btn" style="margin-top:12px;">取り込む</button>
+  </form>
+</div>
+{% endblock %}

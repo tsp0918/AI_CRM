@@ -1,14 +1,24 @@
-"""デモ用パイプラインデータの投入コマンド。
+"""デモ用パイプラインデータの投入コマンド(半導体製造材料の商談シナリオ)。
 
   python scripts/seed_demo_pipeline.py --tenant-id <uuid>
 
-指定テナントの既存データを全削除したうえで、Lead〜既存契約まで6段階の
-案件を実際のアプリのロジックを通して作り直す。直接 INSERT ではなく、
-IngestionSource → ExtractionProposal(承認/却下/自動適用) →
+指定テナントの既存パイプラインデータ(Lead〜契約)を全削除したうえで、
+6段階の商談を実際のアプリのロジックを通して作り直す。直接 INSERT では
+なく、IngestionSource → ExtractionProposal(承認/却下/自動適用) →
 apply_proposal、apply_stage_transition という本物の経路を通す。これにより:
   - 活動ログ(StageTransition/ExtractionProposal)が実運用と同じ形で残る
   - クオリフィケーション値に evidence_quote(根拠)が紐づく
-  - Lead には Contact 登録(register_contact_and_link)で人物が伴う
+  - 案件化(Qualified)以降は商品構成(EngagementLineItem)を実際の
+    Product Priceリストから組み、案件金額はそこから自動計算される
+
+取引先(Account)は scripts/import_erp_business_partners_csv.py で取り込み
+済みの ErpBusinessPartner(CUSTOMER)から実名を使い、Account.external_system
+/external_id で紐付ける。商品は scripts/apply_fert_pricing.py で価格設定
+済みの Product(半導体製造材料)を使う。どちらも先に実行しておくこと
+(2026-08-13 ユーザー指示: 商品表を使って商談ダミーデータを作り直す)。
+
+Product / ProductGroup / ErpMaterial / ErpBusinessPartner はここでは
+削除しない — 別スクリプトで管理するマスタデータのため。
 
 §7.4: crm_app ロール(非 superuser)で接続し、RLS のテナント文脈を
 自分で SET してから実行する。
@@ -26,12 +36,13 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
 from crm_mvp.enums import (
-    AccessLevel, BuyingCenterRole, Confidence, Criterion, EdgeType,
-    ProposalStatus, SourceKind, Stage, Stance, VerificationMethod,
+    AccessLevel, BuyingCenterRole, Confidence, ContractStatus, Criterion,
+    EdgeType, ProposalStatus, QuoteStatus, SourceKind, Stage, Stance,
+    VerificationMethod,
 )
 from crm_mvp.models import (
-    Account, Engagement, ExtractionProposal, GraphEdge, GraphNode,
-    IngestionSource, QualificationSlot, Waiver,
+    Account, Engagement, ErpBusinessPartner, ExtractionProposal, GraphEdge,
+    GraphNode, IngestionSource, Product, QualificationSlot, Waiver,
 )
 from crm_mvp.schemas.extraction import ExtractedClaim
 from crm_mvp.services.apply_proposal import apply_proposal
@@ -39,6 +50,11 @@ from crm_mvp.services.contacts import (
     link_contact_to_engagement, register_contact_and_link,
 )
 from crm_mvp.services.decay_policy import compute_decays_at
+from crm_mvp.services.pricing import add_line_item
+from crm_mvp.services.quoting import (
+    create_contract, create_quote_from_engagement, update_contract_status,
+    update_quote_status,
+)
 from crm_mvp.services.seed_policies import (
     upsert_default_autonomy, upsert_gate_policies,
 )
@@ -60,8 +76,21 @@ class DealBuilder:
     def __init__(self, session: Session):
         self.session = session
 
-    def create_lead(self, account_name: str, engagement_name: str, created: datetime):
-        account = Account(tenant_id=TENANT_ID, name=account_name)
+    def create_lead(
+        self, bp_code: str, engagement_name: str, created: datetime,
+    ):
+        """取引先は ErpBusinessPartner から実名を引いて Account を作る。
+        external_system/external_id で ERP側の bp_code に紐付ける。"""
+        bp = self.session.execute(
+            select(ErpBusinessPartner).where(
+                ErpBusinessPartner.tenant_id == TENANT_ID,
+                ErpBusinessPartner.bp_code == bp_code,
+            )
+        ).scalar_one()
+        account = Account(
+            tenant_id=TENANT_ID, name=bp.name, country=bp.country,
+            external_system="erp", external_id=bp.bp_code,
+        )
         self.session.add(account)
         self.session.flush()
         engagement = Engagement(
@@ -71,6 +100,20 @@ class DealBuilder:
         self.session.add(engagement)
         self.session.flush()
         return account, engagement
+
+    def add_products(self, engagement, items: list[tuple[str, int, str]]):
+        """商品名(Product.name = ERP品目のdescriptionをそのまま踏襲)・数量・
+        値引率のタプルから商品構成を組む。案件金額はここから自動計算される。"""
+        for name, quantity, discount_rate in items:
+            product = self.session.execute(
+                select(Product).where(
+                    Product.tenant_id == TENANT_ID, Product.name == name,
+                )
+            ).scalar_one()
+            add_line_item(
+                self.session, TENANT_ID, engagement, product=product,
+                quantity=quantity, discount_rate=Decimal(discount_rate),
+            )
 
     def add_contact(
         self, engagement, *, name, title=None, org_unit=None, email=None,
@@ -238,8 +281,33 @@ class DealBuilder:
             )
         ).scalar_one()
 
+    def wire_quote_and_contract(self, engagement, *, when: datetime):
+        """商品構成が確定した受注案件に、見積もり(SENT→ACCEPTED)と
+        契約(SIGNED→ACTIVE)まで実サービス経由で発行する。"""
+        actor = f"human:{ACTOR_ID}"
+        quote = create_quote_from_engagement(
+            self.session, TENANT_ID, engagement, valid_until=None, actor=actor,
+        )
+        quote.created_at = when
+        update_quote_status(quote, QuoteStatus.SENT)
+        update_quote_status(quote, QuoteStatus.ACCEPTED)
+
+        contract = create_contract(
+            self.session, TENANT_ID, engagement, quote=quote,
+            start_date=None, end_date=None, actor=actor,
+        )
+        contract.created_at = when
+        update_contract_status(contract, ContractStatus.SIGNED)
+        update_contract_status(contract, ContractStatus.ACTIVE)
+        self.session.flush()
+        return quote, contract
+
 
 def wipe_tenant_data(session: Session) -> None:
+    """商談パイプラインのデータのみを削除する。Product/ProductGroup/
+    ErpMaterial/ErpBusinessPartner は別スクリプトが管理するマスタデータ
+    のためここでは削除しない(engagement_line_item/quote/contract は
+    engagement 削除時に ON DELETE CASCADE で連鎖削除される)。"""
     tables = [
         "waiver", "gate_evaluation", "extraction_proposal", "ingestion_source",
         "engagement_role", "graph_edge", "graph_node", "qualification_slot",
@@ -254,83 +322,86 @@ def wipe_tenant_data(session: Session) -> None:
 
 
 def build_deal_1_lead(b: DealBuilder):
-    """Lead: 引き合いが来たばかり。提案はまだ未レビュー(承認待ち)。"""
+    """Lead: CMPスラリーの品質不具合を機に代替サプライヤーを探し始めた引き合い。"""
     _, eng = b.create_lead(
-        "山田電子工業株式会社", "生産設備更新に関する引き合い", days_ago(4),
+        "BP-3000005", "銅CMPスラリー代替サプライヤー引き合い", days_ago(4),
     )
     b.add_contact(
-        eng, name="山田 太郎", title="購買担当", org_unit="購買部",
+        eng, name="林 建華", title="購買主任", org_unit="購買部",
         role=None, access_level=AccessLevel.CONTACTED, when=days_ago(4),
     )
     source = b.ingest(
         eng, kind=SourceKind.EMAIL,
         raw_text=(
-            "お世話になっております。現行の検査工程で歩留まりが伸び悩んでおり、"
-            "設備更新のご相談ができればと思いご連絡しました。"
+            "お世話になっております。現行の銅配線CMP工程でディッシング不良が"
+            "散発しており、スラリーの切り替えを検討したくご連絡しました。"
         ),
         when=days_ago(4),
     )
     b.propose(
         eng, source, target_type="qualification_slot",
         field_path="criterion:identified_pain",
-        value={"summary": "検査工程の歩留まりが伸び悩んでいる"}, model_score=0.72,
+        value={"summary": "銅配線CMP工程でディッシング不良が散発している"}, model_score=0.71,
         rationale="問い合わせ文面から課題感を抽出",
-        evidence_quote="現行の検査工程で歩留まりが伸び悩んでおり",
+        evidence_quote="銅配線CMP工程でディッシング不良が散発しており",
         when=days_ago(4), decision="pending",
     )
 
 
 def build_deal_2_prospect(b: DealBuilder):
-    """Prospect(案件化手前): 初回ヒアリング済み、ペイン・タイミングを確認中。"""
+    """Prospect(案件化手前): 洗浄薬液の代替評価を開始、タイミングを確認中。"""
     _, eng = b.create_lead(
-        "北陸精密機械株式会社", "検査装置導入検討", days_ago(20),
+        "BP-2000003", "洗浄薬液サプライヤー切替評価", days_ago(20),
     )
     b.add_contact(
-        eng, name="鈴木 一郎", title="生産技術課長", org_unit="生産技術部",
+        eng, name="Daniel Cohen", title="技術部長", org_unit="プロセス開発部",
         role=BuyingCenterRole.USER, access_level=AccessLevel.ENGAGED,
         when=days_ago(18),
     )
     source = b.ingest(
         eng, kind=SourceKind.TRANSCRIPT,
         raw_text=(
-            "鈴木様: 検査装置が古く、来年度上期までには入れ替えたいと考えています。"
-            "現状は目視検査に頼っている部分が多く、負荷が大きいです。"
+            "Cohen様: 現行の洗浄薬液サプライヤーの供給が不安定で、来四半期までには"
+            "セカンドソースを確立したいと考えています。評価にはウェハテストが必要です。"
         ),
         when=days_ago(15),
     )
     b.propose(
         eng, source, target_type="qualification_slot",
         field_path="criterion:identified_pain",
-        value={"summary": "目視検査への依存による負荷増"}, model_score=0.81,
-        rationale="発言から課題を抽出", evidence_quote="目視検査に頼っている部分が多く、負荷が大きい",
+        value={"summary": "洗浄薬液の供給が不安定でセカンドソースが必要"}, model_score=0.8,
+        rationale="発言から課題を抽出", evidence_quote="サプライヤーの供給が不安定で",
         when=days_ago(15), decision="accept",
     )
     b.propose(
         eng, source, target_type="qualification_slot", field_path="criterion:timing",
-        value={"target_date": str(date.today() + timedelta(days=200)),
-               "driver": "来年度上期の設備更新予定"}, model_score=0.78,
-        rationale="発言中の希望時期を抽出", evidence_quote="来年度上期までには入れ替えたい",
+        value={"target_date": str(date.today() + timedelta(days=90)),
+               "driver": "セカンドソース確立の社内目標"}, model_score=0.76,
+        rationale="発言中の希望時期を抽出", evidence_quote="来四半期までにはセカンドソースを確立したい",
         when=days_ago(15), decision="accept",
     )
     b.advance(eng, Stage.PROSPECT, when=days_ago(15))
 
 
 def build_deal_3_qualified(b: DealBuilder):
-    """案件化(Qualified): 2名と関係構築済み。ペイン・タイミング・定量効果まで確認。"""
+    """案件化(Qualified): 洗浄薬液の年間供給契約。2名と関係構築済み。"""
     _, eng = b.create_lead(
-        "東海鋳造株式会社", "生産ライン増設案件", days_ago(50),
+        "BP-2000001", "洗浄薬液 年間供給契約", days_ago(50),
     )
-    eng.amount = Decimal("15000000")
-    eng.currency = "JPY"
+    b.add_products(eng, [
+        ("SC-1 Cleaning Solution (Standard)", 500, "5"),
+        ("Photoresist Stripping Solution NMP-Free NSC-STR02", 200, "0"),
+        ("Cleaning Chemical Kit SC-2 Formulation", 300, "0"),
+    ])
     eng.expected_close_date = date.today() + timedelta(days=120)
 
     b.add_contact(
-        eng, name="田中 修", title="製造部長", org_unit="製造部",
+        eng, name="陳 志明", title="購買部長", org_unit="購買部",
         role=BuyingCenterRole.CHAMPION, access_level=AccessLevel.ENGAGED,
         when=days_ago(48),
     )
     b.add_contact(
-        eng, name="佐々木 玲", title="生産技術主任", org_unit="生産技術部",
+        eng, name="林 佳穎", title="品質保証課長", org_unit="品質保証部",
         role=BuyingCenterRole.USER, access_level=AccessLevel.ENGAGED,
         when=days_ago(40),
     )
@@ -338,23 +409,24 @@ def build_deal_3_qualified(b: DealBuilder):
     src1 = b.ingest(
         eng, kind=SourceKind.TRANSCRIPT,
         raw_text=(
-            "田中様: 増産計画に伴いラインを増設したいが、現行工程の歩留まりが"
-            "目標より3ポイント低い状態が続いている。年内には方向性を固めたい。"
+            "陳様: 年間の薬液使用量が増えており、供給の安定性とコストの両面で"
+            "見直したい。現行品よりパーティクル残留が目標値より高い状態が続いている。"
+            "年内には契約先を固めたい。"
         ),
         when=days_ago(45),
     )
     b.propose(
         eng, src1, target_type="qualification_slot",
         field_path="criterion:identified_pain",
-        value={"summary": "歩留まりが目標より3ポイント低い"}, model_score=0.84,
-        rationale="発言から課題を抽出", evidence_quote="現行工程の歩留まりが目標より3ポイント低い状態",
+        value={"summary": "洗浄後のパーティクル残留が目標値より高い"}, model_score=0.84,
+        rationale="発言から課題を抽出", evidence_quote="パーティクル残留が目標値より高い状態",
         when=days_ago(45), decision="accept",
     )
     b.propose(
         eng, src1, target_type="qualification_slot", field_path="criterion:timing",
         value={"target_date": str(date.today() + timedelta(days=140)),
-               "driver": "増産計画"}, model_score=0.75,
-        rationale="発言中の希望時期を抽出", evidence_quote="年内には方向性を固めたい",
+               "driver": "年間供給契約の切替タイミング"}, model_score=0.75,
+        rationale="発言中の希望時期を抽出", evidence_quote="年内には契約先を固めたい",
         when=days_ago(45), decision="accept",
     )
     b.advance(eng, Stage.PROSPECT, when=days_ago(45))
@@ -363,35 +435,39 @@ def build_deal_3_qualified(b: DealBuilder):
     src2 = b.ingest(
         eng, kind=SourceKind.TRANSCRIPT,
         raw_text=(
-            "田中様: 歩留まり改善で年間換算 900万円ほどの効果を見込んでいます。"
+            "陳様: パーティクル低減で歩留まり改善、年間換算800万円ほどの効果を"
+            "見込んでいます。"
         ),
         when=days_ago(30),
     )
     b.propose(
         eng, src2, target_type="qualification_slot", field_path="criterion:metrics",
-        value={"kpi": "歩留まり", "baseline": 92.0, "target": 95.0, "unit": "%",
-               "annual_value": 9000000}, model_score=0.79,
-        rationale="効果額の言及から抽出", evidence_quote="年間換算 900万円ほどの効果を見込んでいます",
+        value={"kpi": "洗浄後パーティクル数", "baseline": 45.0, "target": 20.0,
+               "unit": "個/枚", "annual_value": 8000000}, model_score=0.78,
+        rationale="効果額の言及から抽出", evidence_quote="年間換算800万円ほどの効果を見込んでいます",
         when=days_ago(30), decision="accept",
     )
 
 
 def build_deal_4_proposal(b: DealBuilder):
-    """提案(Proposal): 評価基準・予算まで確認済み、見積提示中。"""
+    """提案(Proposal): 銅配線CMPスラリーの切替提案。評価基準・予算まで確認済み。"""
     _, eng = b.create_lead(
-        "中部電子部品株式会社", "半導体検査装置更新案件", days_ago(70),
+        "BP-3000004", "銅配線CMPスラリー切替提案", days_ago(70),
     )
-    eng.amount = Decimal("28000000")
-    eng.currency = "JPY"
+    b.add_products(eng, [
+        ("CMP Slurry for Copper NSC-CuS18", 400, "0"),
+        ("Copper Interconnect CMP Slurry NSC-CuP22", 250, "0"),
+        ("W-CMP Slurry Advanced H2O2-free NSC-WSL55", 150, "10"),
+    ])
     eng.expected_close_date = date.today() + timedelta(days=90)
 
     b.add_contact(
-        eng, name="小林 誠", title="製造技術部長", org_unit="製造技術部",
+        eng, name="Robert Chen", title="VP Manufacturing", org_unit="製造本部",
         role=BuyingCenterRole.CHAMPION, access_level=AccessLevel.ENGAGED,
         when=days_ago(65),
     )
     b.add_contact(
-        eng, name="渡辺 美咲", title="品質保証課長", org_unit="品質保証部",
+        eng, name="Sarah Kim", title="Quality Engineering Manager", org_unit="品質保証部",
         role=BuyingCenterRole.TECHNICAL_GATE, access_level=AccessLevel.ENGAGED,
         when=days_ago(50),
     )
@@ -399,34 +475,33 @@ def build_deal_4_proposal(b: DealBuilder):
     src1 = b.ingest(
         eng, kind=SourceKind.TRANSCRIPT,
         raw_text=(
-            "小林様: 検査タクトタイムを12秒から8秒に短縮したい。年間効果は900万円程度。"
-            "評価基準は検査精度・既存ラインとの互換性・保守体制の3点。"
-            "予算は来期分で確保済みです。"
+            "Chen様: 銅配線工程のディッシングが歩留まりのボトルネックになっている。"
+            "評価基準は平坦性実績・供給安定性・価格の3点。予算は来期分で確保済みです。"
         ),
         when=days_ago(55),
     )
     b.propose(
         eng, src1, target_type="qualification_slot",
         field_path="criterion:identified_pain",
-        value={"summary": "検査タクトタイムが長く生産のボトルネックになっている"},
-        model_score=0.8, rationale="発言から課題を抽出",
-        evidence_quote="検査タクトタイムを12秒から8秒に短縮したい",
+        value={"summary": "銅配線工程のディッシングが歩留まりのボトルネック"},
+        model_score=0.81, rationale="発言から課題を抽出",
+        evidence_quote="ディッシングが歩留まりのボトルネックになっている",
         when=days_ago(55), decision="accept",
     )
     b.propose(
         eng, src1, target_type="qualification_slot", field_path="criterion:timing",
         value={"target_date": str(date.today() + timedelta(days=100)),
-               "driver": "生産計画"}, model_score=0.7,
-        rationale="納期要望から推定", evidence_quote="検査タクトタイムを12秒から8秒に短縮したい",
+               "driver": "次期量産計画"}, model_score=0.72,
+        rationale="納期要望から推定", evidence_quote="評価基準は平坦性実績・供給安定性・価格の3点",
         when=days_ago(55), decision="accept",
     )
     b.advance(eng, Stage.PROSPECT, when=days_ago(55))
 
     b.propose(
         eng, src1, target_type="qualification_slot", field_path="criterion:metrics",
-        value={"kpi": "検査タクトタイム", "baseline": 12.0, "target": 8.0,
-               "unit": "秒", "annual_value": 9000000}, model_score=0.93,
-        rationale="効果額の言及から抽出", evidence_quote="年間効果は900万円程度",
+        value={"kpi": "ディッシング量", "baseline": 25.0, "target": 12.0,
+               "unit": "nm", "annual_value": 11000000}, model_score=0.9,
+        rationale="効果額の言及から抽出", evidence_quote="ディッシングが歩留まりのボトルネックになっている",
         when=days_ago(54), decision="auto",
     )
     b.advance(eng, Stage.QUALIFIED, when=days_ago(54))
@@ -434,15 +509,15 @@ def build_deal_4_proposal(b: DealBuilder):
     b.propose(
         eng, src1, target_type="qualification_slot",
         field_path="criterion:decision_criteria",
-        value={"criteria": ["検査精度", "既存ラインとの互換性", "保守体制"]},
+        value={"criteria": ["平坦性実績", "供給安定性", "価格"]},
         model_score=0.82, rationale="発言から評価基準を抽出",
-        evidence_quote="評価基準は検査精度・既存ラインとの互換性・保守体制の3点",
+        evidence_quote="評価基準は平坦性実績・供給安定性・価格の3点",
         when=days_ago(20), decision="accept",
     )
     b.propose(
         eng, src1, target_type="qualification_slot", field_path="criterion:budget",
-        value={"amount": 28000000, "fiscal_period": "2026年度", "secured": True},
-        model_score=0.88, rationale="予算確保状況の言及から抽出",
+        value={"amount": 29693750, "fiscal_period": "2026年度", "secured": True},
+        model_score=0.87, rationale="予算確保状況の言及から抽出",
         evidence_quote="予算は来期分で確保済みです",
         when=days_ago(20), decision="accept",
     )
@@ -450,21 +525,25 @@ def build_deal_4_proposal(b: DealBuilder):
 
 
 def build_deal_5_negotiation(b: DealBuilder):
-    """最終交渉(Negotiation): 決裁者まで到達、稟議・競合状況を把握。却下→再提案も含む。"""
+    """最終交渉(Negotiation): EUVフォトレジストの量産採用案件。決裁者まで到達、
+    稟議・競合状況を把握。却下→再提案も含む。"""
     _, eng = b.create_lead(
-        "関西セミコンダクタ株式会社", "半導体前工程装置導入案件", days_ago(90),
+        "BP-3000002", "EUVフォトレジスト量産採用案件", days_ago(90),
     )
-    eng.amount = Decimal("85000000")
-    eng.currency = "JPY"
+    b.add_products(eng, [
+        ("EUV Photoresist NSP-EUV13 (Pilot Lot)", 20, "0"),
+        ("EUV Photoresist EUV-RS100 13.5nm (High-End)", 10, "0"),
+        ("ArF Immersion Photoresist NSP-AR450", 100, "5"),
+    ])
     eng.expected_close_date = date.today() + timedelta(days=45)
 
     _, champion_role = b.add_contact(
-        eng, name="佐藤 健", title="製造技術部長", org_unit="製造技術部",
+        eng, name="金 敏俊", title="製造技術部長", org_unit="製造技術部",
         role=BuyingCenterRole.CHAMPION, access_level=AccessLevel.ENGAGED,
         when=days_ago(85),
     )
     _, finance_role = b.add_contact(
-        eng, name="伊藤 直子", title="経理部 課長", org_unit="経理部",
+        eng, name="朴 惠珍", title="経理部長", org_unit="経理部",
         role=BuyingCenterRole.FINANCE, access_level=AccessLevel.ENGAGED,
         when=days_ago(60),
     )
@@ -497,17 +576,18 @@ def build_deal_5_negotiation(b: DealBuilder):
     src1 = b.ingest(
         eng, kind=SourceKind.TRANSCRIPT,
         raw_text=(
-            "佐藤様: 前工程の歩留まりが低下しており、来期予算で装置更新を検討中。"
-            "評価基準は精度と保守体制。予算は確保見込み。"
+            "金様: EUV露光の量産採用に向けてフォトレジストを評価中。"
+            "来期予算でパイロットロットから本採用に切り替えたい。"
+            "評価基準は解像性能と保守体制。予算は確保見込み。"
         ),
         when=days_ago(80),
     )
     for field, value, score, quote in [
-        ("criterion:identified_pain", {"summary": "前工程の歩留まりが低下"}, 0.85,
-         "前工程の歩留まりが低下しており"),
+        ("criterion:identified_pain", {"summary": "EUV露光の解像性能が量産目標に未達"}, 0.85,
+         "EUV露光の量産採用に向けてフォトレジストを評価中"),
         ("criterion:timing", {"target_date": str(date.today() + timedelta(days=60)),
-                               "driver": "来期予算での更新計画"}, 0.77,
-         "来期予算で装置更新を検討中"),
+                               "driver": "来期予算での量産切替計画"}, 0.77,
+         "来期予算でパイロットロットから本採用に切り替えたい"),
     ]:
         b.propose(eng, src1, target_type="qualification_slot", field_path=field,
                    value=value, model_score=score, rationale="発言から抽出",
@@ -516,9 +596,9 @@ def build_deal_5_negotiation(b: DealBuilder):
 
     b.propose(
         eng, src1, target_type="qualification_slot", field_path="criterion:metrics",
-        value={"kpi": "歩留まり", "baseline": 88.0, "target": 93.0, "unit": "%",
-               "annual_value": 15000000}, model_score=0.8,
-        rationale="効果額の推定", evidence_quote="前工程の歩留まりが低下しており",
+        value={"kpi": "パターン解像限界", "baseline": 15.0, "target": 13.0, "unit": "nm",
+               "annual_value": 40000000}, model_score=0.82,
+        rationale="効果額の推定", evidence_quote="EUV露光の量産採用に向けてフォトレジストを評価中",
         when=days_ago(78), decision="accept",
     )
     b.advance(eng, Stage.QUALIFIED, when=days_ago(77))
@@ -526,13 +606,13 @@ def build_deal_5_negotiation(b: DealBuilder):
     b.propose(
         eng, src1, target_type="qualification_slot",
         field_path="criterion:decision_criteria",
-        value={"criteria": ["検査精度", "保守体制"]}, model_score=0.75,
-        rationale="発言から評価基準を抽出", evidence_quote="評価基準は精度と保守体制",
+        value={"criteria": ["解像性能", "保守体制"]}, model_score=0.75,
+        rationale="発言から評価基準を抽出", evidence_quote="評価基準は解像性能と保守体制",
         when=days_ago(60), decision="accept",
     )
     b.propose(
         eng, src1, target_type="qualification_slot", field_path="criterion:budget",
-        value={"amount": 85000000, "fiscal_period": "2026年度", "secured": False},
+        value={"amount": 102187500, "fiscal_period": "2026年度", "secured": False},
         model_score=0.68, rationale="予算状況の言及から抽出",
         evidence_quote="予算は確保見込み",
         when=days_ago(60), decision="accept",
@@ -542,9 +622,9 @@ def build_deal_5_negotiation(b: DealBuilder):
     src2 = b.ingest(
         eng, kind=SourceKind.TRANSCRIPT,
         raw_text=(
-            "佐藤様: 決裁は工場長が行うが、経理部長の予算承認が前提。"
+            "金様: 決裁は工場長が行うが、経理部長の予算承認が前提。"
             "稟議は3階層、法務レビューも必要とのこと。"
-            "競合はB社を比較検討中と聞いている。"
+            "競合はC社を比較検討中と聞いている。"
         ),
         when=days_ago(20),
     )
@@ -564,13 +644,13 @@ def build_deal_5_negotiation(b: DealBuilder):
         evidence_quote="稟議は3階層、法務レビューも必要とのこと",
         when=days_ago(20), decision="accept",
     )
-    # 最初の競合抽出は誤り(B社のみと誤認)→ 却下、翌週の確認で訂正
+    # 最初の競合抽出は誤り(C社のみと誤認)→ 却下、翌週の確認で訂正
     b.propose(
         eng, src2, target_type="qualification_slot", field_path="criterion:competition",
-        value={"vendors": ["B社"]}, model_score=0.6,
-        rationale="発言から競合を抽出", evidence_quote="競合はB社を比較検討中と聞いている",
+        value={"vendors": ["C社"]}, model_score=0.6,
+        rationale="発言から競合を抽出", evidence_quote="競合はC社を比較検討中と聞いている",
         when=days_ago(20), decision="reject",
-        corrected_value={"vendors": ["A社", "B社"], "incumbent": "A社"},
+        corrected_value={"vendors": ["A社", "C社"], "incumbent": "A社"},
     )
     src3 = b.ingest(
         eng, kind=SourceKind.EMAIL,
@@ -581,7 +661,7 @@ def build_deal_5_negotiation(b: DealBuilder):
     )
     b.propose(
         eng, src3, target_type="qualification_slot", field_path="criterion:competition",
-        value={"vendors": ["A社", "B社"], "incumbent": "A社"}, model_score=0.86,
+        value={"vendors": ["A社", "C社"], "incumbent": "A社"}, model_score=0.86,
         rationale="訂正情報を反映して再抽出",
         evidence_quote="現行ベンダーのA社も含めて比較検討している",
         when=days_ago(13), decision="accept",
@@ -595,20 +675,24 @@ def build_deal_5_negotiation(b: DealBuilder):
 
 
 def build_deal_6_closed_won(b: DealBuilder):
-    """既存契約(Closed Won): Waiver を使って前倒しし、後日正式に条件を満たして受注。"""
+    """既存契約(Closed Won): CMP装置一式導入契約。Waiverで前倒しし、後日
+    正式に条件を満たして受注。見積もり・契約まで発行する。"""
     _, eng = b.create_lead(
-        "東北製作所株式会社", "検査ライン一式導入契約", days_ago(150),
+        "BP-3000001", "CMP装置一式導入契約", days_ago(150),
     )
-    eng.amount = Decimal("42000000")
-    eng.currency = "JPY"
+    b.add_products(eng, [
+        ("CMP Tool NSC-CMP-Pro100 (300mm wafer process)", 1, "0"),
+        ("Chemical Delivery System CDS-500 (Point-of-Use)", 1, "0"),
+        ("Chemical Blending Unit CBU-200 (PFA wetted)", 1, "0"),
+    ])
 
     _, decider_role = b.add_contact(
-        eng, name="高橋 誠一", title="取締役製造本部長", org_unit="製造本部",
+        eng, name="呉 俊傑", title="取締役製造本部長", org_unit="製造本部",
         role=BuyingCenterRole.DECIDER, access_level=AccessLevel.ENGAGED,
         when=days_ago(145),
     )
     b.add_contact(
-        eng, name="村上 恵", title="経理部長", org_unit="経理部",
+        eng, name="謝 美玲", title="経理部長", org_unit="経理部",
         role=BuyingCenterRole.FINANCE, access_level=AccessLevel.ENGAGED,
         when=days_ago(120),
     )
@@ -621,16 +705,17 @@ def build_deal_6_closed_won(b: DealBuilder):
     src1 = b.ingest(
         eng, kind=SourceKind.TRANSCRIPT,
         raw_text=(
-            "高橋様: 検査ラインを一式刷新したい。歩留まり改善効果は年間1200万円想定。"
-            "評価基準は納期と価格。予算は確保済み。"
+            "呉様: CMP工程を300mmライン向けに一式刷新したい。歩留まり改善効果は"
+            "年間2000万円想定。評価基準は納期と価格。予算は確保済み。"
         ),
         when=days_ago(140),
     )
     for field, value, score, quote in [
-        ("criterion:identified_pain", {"summary": "検査ラインの老朽化"}, 0.8,
-         "検査ラインを一式刷新したい"),
+        ("criterion:identified_pain", {"summary": "既存CMPラインの老朽化"}, 0.8,
+         "CMP工程を300mmライン向けに一式刷新したい"),
         ("criterion:timing", {"target_date": str(date.today() - timedelta(days=60)),
-                               "driver": "既存契約更新時期"}, 0.75, "検査ラインを一式刷新したい"),
+                               "driver": "既存契約更新時期"}, 0.75,
+         "CMP工程を300mmライン向けに一式刷新したい"),
     ]:
         b.propose(eng, src1, target_type="qualification_slot", field_path=field,
                    value=value, model_score=score, rationale="発言から抽出",
@@ -639,9 +724,9 @@ def build_deal_6_closed_won(b: DealBuilder):
 
     b.propose(
         eng, src1, target_type="qualification_slot", field_path="criterion:metrics",
-        value={"kpi": "歩留まり", "baseline": 90.0, "target": 96.0, "unit": "%",
-               "annual_value": 12000000}, model_score=0.85, rationale="効果額の言及から抽出",
-        evidence_quote="歩留まり改善効果は年間1200万円想定",
+        value={"kpi": "歩留まり", "baseline": 91.0, "target": 96.5, "unit": "%",
+               "annual_value": 20000000}, model_score=0.85, rationale="効果額の言及から抽出",
+        evidence_quote="歩留まり改善効果は年間2000万円想定",
         when=days_ago(138), decision="accept",
     )
     b.advance(eng, Stage.QUALIFIED, when=days_ago(137))
@@ -655,7 +740,7 @@ def build_deal_6_closed_won(b: DealBuilder):
     )
     b.propose(
         eng, src1, target_type="qualification_slot", field_path="criterion:budget",
-        value={"amount": 42000000, "fiscal_period": "2025年度", "secured": True},
+        value={"amount": 2267500000, "fiscal_period": "2025年度", "secured": True},
         model_score=0.9, rationale="予算確保状況の言及から抽出", evidence_quote="予算は確保済み",
         when=days_ago(120), decision="accept",
     )
@@ -679,7 +764,7 @@ def build_deal_6_closed_won(b: DealBuilder):
     src2 = b.ingest(
         eng, kind=SourceKind.TRANSCRIPT,
         raw_text=(
-            "高橋様: 決裁は私の権限で完結します。稟議は2階層、法務レビュー不要。"
+            "呉様: 決裁は私の権限で完結します。稟議は2階層、法務レビュー不要。"
             "他社との比較は行わず、貴社に一本化する方針です。"
         ),
         when=days_ago(90),
@@ -708,21 +793,27 @@ def build_deal_6_closed_won(b: DealBuilder):
 
     b.verify_slot(
         eng, Criterion.ECONOMIC_BUYER, method=VerificationMethod.CUSTOMER_DOCUMENT,
-        evidence_uri="s3://demo-bucket/tohoku-order-confirmation.pdf",
+        evidence_uri="s3://demo-bucket/apex-foundry-order-confirmation.pdf",
         when=days_ago(25),
     )
     b.verify_slot(
         eng, Criterion.BUDGET, method=VerificationMethod.CUSTOMER_DOCUMENT,
-        evidence_uri="s3://demo-bucket/tohoku-po.pdf", when=days_ago(25),
+        evidence_uri="s3://demo-bucket/apex-foundry-po.pdf", when=days_ago(25),
     )
     b.advance(eng, Stage.CLOSED_WON, when=days_ago(20))
+
+    quote, contract = b.wire_quote_and_contract(eng, when=days_ago(19))
+    print(
+        f"  {eng.name}: 見積もり {quote.quote_number}、契約 {contract.contract_number} "
+        f"を発行しました(合計 {contract.total_amount:,.0f} {contract.currency})。"
+    )
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--tenant-id", type=uuid.UUID, default=DEFAULT_TENANT_ID,
-        help="投入先テナントID(既存データはこのテナント分のみ全削除される)",
+        help="投入先テナントID(既存の商談データはこのテナント分のみ全削除される)",
     )
     return parser.parse_args()
 
