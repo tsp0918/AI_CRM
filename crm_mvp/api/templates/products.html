@@ -5,19 +5,32 @@
 {% block content %}
 <h1>商品(価格表)</h1>
 <p class="subtitle">
-  Product Priceリスト。将来ERPと連携する前提のダミーデータです。案件の商品構成はここから選択します。
+  Product Priceリスト。<a href="/ui/erp-materials">ERP品目マスタ</a>に販売価格・商品グループを付加してCRM商品にします。
+  ERP品目と紐付けない完全なダミー商品も引き続き登録できます。案件の商品構成はここから選択します。
 </p>
 
 {% if products %}
 <div class="card" style="padding:0;">
   <table>
-    <thead><tr><th>商品名</th><th>SKU</th><th>定価</th><th>状態</th><th></th></tr></thead>
+    <thead>
+      <tr><th>商品名</th><th>SKU</th><th>商品グループ</th><th>定価</th><th>原価(ERP)</th><th>粗利率</th><th>状態</th><th></th></tr>
+    </thead>
     <tbody>
       {% for p in products %}
       <tr>
         <td>{{ p.name }}{% if p.description %}<div class="muted" style="font-size:12px;">{{ p.description }}</div>{% endif %}</td>
         <td class="mono">{{ p.sku or "—" }}</td>
+        <td>{{ p.product_group.name if p.product_group else "—" }}</td>
         <td class="mono">{{ "{:,.0f}".format(p.list_price) }} {{ p.currency }}</td>
+        <td class="mono">
+          {% if p.erp_material %}{{ "{:,.0f}".format(p.erp_material.standard_price) }} {{ p.erp_material.currency }}{% else %}—{% endif %}
+        </td>
+        <td class="mono">
+          {% set margin = margins.get(p.id) %}
+          {% if margin is not none %}
+            <span class="badge {% if margin < 0 %}badge-gate-block{% else %}badge-gate-ok{% endif %}">{{ margin }}%</span>
+          {% else %}—{% endif %}
+        </td>
         <td>{% if p.is_active %}<span class="badge badge-gate-ok">公開中</span>{% else %}<span class="muted">非公開</span>{% endif %}</td>
         <td>
           {% if p.is_active %}
@@ -48,9 +61,16 @@
         <input type="text" id="sku" name="sku" placeholder="例: INSP-100">
       </div>
     </div>
+    <label for="erp_material_id">ERP品目から価格設定する(任意)</label>
+    <select id="erp_material_id" name="erp_material_id">
+      <option value="">(ERP品目と紐付けないダミー商品)</option>
+      {% for m in materials %}
+      <option value="{{ m.id }}">{{ m.material_code }} — {{ m.description }}(原価 {{ "{:,.0f}".format(m.standard_price) }} {{ m.currency }})</option>
+      {% endfor %}
+    </select>
     <div class="field-row">
       <div>
-        <label for="list_price">定価</label>
+        <label for="list_price">定価(CRM販売価格)</label>
         <input type="text" id="list_price" name="list_price" required placeholder="例: 1000000">
       </div>
       <div>
@@ -58,9 +78,46 @@
         <input type="text" id="currency" name="currency" value="JPY">
       </div>
     </div>
+    <label for="product_group_id">商品グループ(任意)</label>
+    <select id="product_group_id" name="product_group_id">
+      <option value="">(未分類)</option>
+      {% for g in product_groups %}
+      <option value="{{ g.id }}">{% if g.parent_group_id %}└ {% endif %}{{ g.name }}</option>
+      {% endfor %}
+    </select>
     <label for="description">説明(任意)</label>
     <textarea id="description" name="description"></textarea>
     <button type="submit" class="btn">登録する</button>
   </form>
+</div>
+
+<div class="card">
+  <h2>商品グループ</h2>
+  {% if product_groups %}
+  <ul style="font-size:13px; padding-left:18px; margin:0 0 14px;">
+    {% for g in product_groups %}
+    <li>{% if g.parent_group_id %}└ {% endif %}{{ g.name }}{% if g.description %} — <span class="muted">{{ g.description }}</span>{% endif %}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty-state">まだ商品グループがありません。</p>
+  {% endif %}
+  <details>
+    <summary style="cursor:pointer; font-size:13px; color:#2563eb;">+ 商品グループを追加</summary>
+    <form method="post" action="/ui/product-groups/new" style="margin-top:10px; max-width:420px;">
+      <label for="group_name">グループ名</label>
+      <input type="text" id="group_name" name="name" required placeholder="例: 検査装置">
+      <label for="group_parent">親グループ(任意)</label>
+      <select id="group_parent" name="parent_group_id">
+        <option value="">(トップレベル)</option>
+        {% for g in product_groups %}
+        <option value="{{ g.id }}">{{ g.name }}</option>
+        {% endfor %}
+      </select>
+      <label for="group_description">説明(任意)</label>
+      <input type="text" id="group_description" name="description">
+      <button type="submit" class="btn btn-sm">作成する</button>
+    </form>
+  </details>
 </div>
 {% endblock %}

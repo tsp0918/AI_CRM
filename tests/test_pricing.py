@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from crm_mvp.models import Product
+from crm_mvp.models import ErpMaterial, Product
 from crm_mvp.services import pricing as pr
 
 from .conftest import create_account_and_engagement
@@ -22,6 +22,19 @@ def make_product(db_session, tenant_id, **overrides) -> Product:
     db_session.add(product)
     db_session.flush()
     return product
+
+
+def make_erp_material(db_session, tenant_id, **overrides) -> ErpMaterial:
+    defaults = dict(
+        tenant_id=tenant_id, material_code="MAT-0001", description="検査装置 標準モデル",
+        material_type="FERT", base_unit="PC", standard_price=Decimal("700000"),
+        currency="JPY",
+    )
+    defaults.update(overrides)
+    material = ErpMaterial(**defaults)
+    db_session.add(material)
+    db_session.flush()
+    return material
 
 
 class TestComputeUnitPrice:
@@ -122,6 +135,28 @@ class TestRemoveLineItem:
         db_session.commit()
 
         assert engagement.amount == Decimal("200000.00")
+
+
+class TestComputeGrossMarginRate:
+    def test_computes_margin_from_linked_erp_material(self, db_session, tenant_id):
+        material = make_erp_material(db_session, tenant_id, standard_price=Decimal("700000"))
+        product = make_product(db_session, tenant_id, list_price=Decimal("1000000"))
+        product.erp_material = material
+        db_session.flush()
+
+        assert pr.compute_gross_margin_rate(product) == Decimal("30.00")
+
+    def test_none_when_no_erp_material_linked(self, db_session, tenant_id):
+        product = make_product(db_session, tenant_id)
+        assert pr.compute_gross_margin_rate(product) is None
+
+    def test_none_when_currency_mismatch(self, db_session, tenant_id):
+        material = make_erp_material(db_session, tenant_id, currency="USD")
+        product = make_product(db_session, tenant_id, currency="JPY")
+        product.erp_material = material
+        db_session.flush()
+
+        assert pr.compute_gross_margin_rate(product) is None
 
 
 class TestListLineItems:

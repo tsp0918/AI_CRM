@@ -1,0 +1,103 @@
+{% extends "_base.html" %}
+
+{% block title %}ERP品目マスタ | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<h1>ERP品目マスタ</h1>
+<p class="subtitle">
+  ERPの品目マスタ(Material)を受け止める「箱」です。ここでの standard_price は<strong>原価</strong>として扱います。
+  ここに取り込んだ品目は、<a href="/ui/products">商品(価格表)</a>から「CRM商品として価格設定する」ことで販売価格・粗利が付きます。
+</p>
+
+{% if materials %}
+<div class="card" style="padding:0;">
+  <table>
+    <thead>
+      <tr><th>品目コード</th><th>品目説明</th><th>区分</th><th>標準価格(原価)</th><th>単位</th><th>状態</th><th>取込日時</th></tr>
+    </thead>
+    <tbody>
+      {% for m in materials %}
+      <tr>
+        <td class="mono">{{ m.material_code }}</td>
+        <td>{{ m.description }}</td>
+        <td class="mono">{{ m.material_type }}</td>
+        <td class="mono">{{ "{:,.0f}".format(m.standard_price) }} {{ m.currency }}</td>
+        <td class="mono">{{ m.base_unit }}</td>
+        <td>{% if m.is_active %}<span class="badge badge-gate-ok">有効</span>{% else %}<span class="muted">無効</span>{% endif %}</td>
+        <td class="mono" style="font-size:11px;">{{ m.imported_at.strftime("%Y-%m-%d %H:%M") }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card"><div class="empty-state">まだ品目が取り込まれていません。下のフォームから取り込んでください。</div></div>
+{% endif %}
+
+<div class="card">
+  <h2>+ ERP品目を取り込む</h2>
+  <p class="subtitle" style="margin-bottom:12px;">
+    同じ品目コードで再取込すると内容が上書き更新されます(アップサート)。
+  </p>
+  <form method="post" action="/ui/erp-materials/import">
+    <div class="field-row">
+      <div>
+        <label for="material_code">品目コード</label>
+        <input type="text" id="material_code" name="material_code" required placeholder="例: MAT-0001001">
+      </div>
+      <div>
+        <label for="material_type">品目区分</label>
+        <select id="material_type" name="material_type">
+          {% for t in material_type_values %}
+          <option value="{{ t.value }}">{{ t.value }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <label for="description">品目説明</label>
+    <input type="text" id="description" name="description" required placeholder="例: ArFフォトレジスト">
+    <div class="field-row">
+      <div>
+        <label for="standard_price">標準価格(原価)</label>
+        <input type="text" id="standard_price" name="standard_price" required placeholder="例: 700000">
+      </div>
+      <div>
+        <label for="currency">通貨</label>
+        <input type="text" id="currency" name="currency" value="JPY">
+      </div>
+      <div>
+        <label for="base_unit">基本単位</label>
+        <input type="text" id="base_unit" name="base_unit" value="PC" placeholder="KG / L / PC / SET">
+      </div>
+    </div>
+    <details>
+      <summary style="cursor:pointer; font-size:13px; color:#2563eb;">輸出コンプライアンス項目(任意・将来利用)</summary>
+      <div class="field-row" style="margin-top:10px;">
+        <div>
+          <label for="hs_code">HSコード</label>
+          <input type="text" id="hs_code" name="hs_code" placeholder="例: 3707.90">
+        </div>
+        <div>
+          <label for="eccn">ECCN</label>
+          <input type="text" id="eccn" name="eccn" placeholder="例: 3B001">
+        </div>
+      </div>
+      <div class="field-row">
+        <div>
+          <label for="fefta_judgment">外為法判定</label>
+          <select id="fefta_judgment" name="fefta_judgment">
+            {% for j in fefta_judgment_values %}
+            <option value="{{ j.value }}" {% if j.value == "UNKNOWN" %}selected{% endif %}>{{ j.value }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="country_of_origin">原産国(ISO 3166-1 alpha-2)</label>
+          <input type="text" id="country_of_origin" name="country_of_origin" placeholder="例: JP">
+        </div>
+      </div>
+    </details>
+    <button type="submit" class="btn" style="margin-top:12px;">取り込む</button>
+  </form>
+</div>
+{% endblock %}

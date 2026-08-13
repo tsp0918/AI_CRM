@@ -238,3 +238,25 @@ class ContractStatus(StrEnum):
     SIGNED = "signed"
     ACTIVE = "active"
     TERMINATED = "terminated"
+
+
+class MaterialType(StrEnum):
+    """ERP品目マスタ(Material)の品目区分。erp-system の分類をそのまま踏襲する。"""
+
+    FERT = "FERT"      # 完成品(製品)
+    HALB = "HALB"      # 半製品(中間体)
+    ROH = "ROH"        # 原材料
+    HAWA = "HAWA"      # 商品(購入品・転売)
+
+
+class FeftaJudgment(StrEnum):
+    """外為法(輸出管理)判定。erp-system の品目マスタから引き継ぐ。
+
+    CRM側では今回まだゲート判定等には使わないが、将来の輸出コンプライアンス
+    連携に備えてフィールドだけ温存する。
+    """
+
+    APPROVED = "APPROVED"
+    APPLICABLE = "APPLICABLE"
+    UNKNOWN = "UNKNOWN"
+    NOT_APPLICABLE = "NOT_APPLICABLE"

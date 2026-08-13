@@ -31,6 +31,25 @@ def compute_unit_price(list_price: Decimal, discount_rate: Decimal) -> Decimal:
     return _round(list_price * (Decimal("100") - discount_rate) / Decimal("100"))
 
 
+def compute_margin_rate(selling_price: Decimal, cost: Decimal) -> Decimal | None:
+    """粗利率(%)。selling_price が0の場合は算出不能として None を返す。"""
+    if selling_price == Decimal("0"):
+        return None
+    return _round((selling_price - cost) / selling_price * Decimal("100"))
+
+
+def compute_gross_margin_rate(product: Product) -> Decimal | None:
+    """商品の粗利率(%) = (list_price - ERP標準価格) / list_price × 100。
+
+    ERP品目マスタと紐付いていない(=原価が不明な)商品、または通貨が
+    一致しない場合は算出しない — 為替換算はv1では非対応(既知の制約)。
+    """
+    material = product.erp_material
+    if material is None or material.currency != product.currency:
+        return None
+    return compute_margin_rate(product.list_price, material.standard_price)
+
+
 def list_line_items(
     session: Session, tenant_id: uuid.UUID, engagement_id: uuid.UUID,
 ) -> list[EngagementLineItem]:

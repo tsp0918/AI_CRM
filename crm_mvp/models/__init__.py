@@ -6,6 +6,8 @@ from .gate import ActionItem, GatePolicy, GateEvaluation, Waiver
 from .ingestion import IngestionSource, ExtractionProposal, FieldAutonomyPolicy
 from .leadgen import Campaign, Lead, Touch
 from .sequence import Sequence, SequenceDraft, SequenceEnrollment, SequenceStep
+from .erp_material import ErpMaterial
+from .product_group import ProductGroup
 from .pricing import EngagementLineItem, Product
 from .quoting import Contract, ContractLineItem, Quote, QuoteLineItem
 
@@ -18,6 +20,7 @@ __all__ = [
     "IngestionSource", "ExtractionProposal", "FieldAutonomyPolicy",
     "Campaign", "Lead", "Touch",
     "Sequence", "SequenceStep", "SequenceEnrollment", "SequenceDraft",
+    "ErpMaterial", "ProductGroup",
     "Product", "EngagementLineItem",
     "Quote", "QuoteLineItem", "Contract", "ContractLineItem",
 ]
