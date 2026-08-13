@@ -154,3 +154,49 @@ class ActionItemStatus(StrEnum):
     OPEN = "open"
     DONE = "done"
     DISMISSED = "dismissed"
+
+
+class LeadStatus(StrEnum):
+    """Lead(案件化前の見込み客)のライフサイクル。"""
+
+    NEW = "new"                   # 初回接点のみ
+    WORKING = "working"           # IS/SDR が接触中
+    MQL = "mql"                   # スコア閾値到達(Marketing Qualified)
+    SQL = "sql"                   # AEレビュー待ち(Sales Qualified)
+    CONVERTED = "converted"       # Engagement へ案件化済み
+    DISQUALIFIED = "disqualified"
+
+
+class LeadSourceChannel(StrEnum):
+    """Leadの獲得経路。"""
+
+    INBOUND = "inbound"
+    OUTBOUND = "outbound"
+    EVENT = "event"
+    REFERRAL = "referral"
+    CONTENT = "content"
+    PARTNER = "partner"
+
+
+class TouchChannel(StrEnum):
+    """Marketing/Inside Sales の個々の接点。"""
+
+    FORM_SUBMIT = "form_submit"
+    CONTENT_DOWNLOAD = "content_download"
+    EVENT_ATTENDANCE = "event_attendance"
+    CALL_ATTEMPTED = "call_attempted"
+    CALL_CONNECTED = "call_connected"
+    EMAIL_OPEN = "email_open"
+    EMAIL_CLICK = "email_click"
+    REFERRAL_TOUCH = "referral_touch"
+    AD_CLICK = "ad_click"
+
+
+class CampaignChannelType(StrEnum):
+    """ROI集計の単位となるCampaignの種別。"""
+
+    EVENT = "event"
+    CONTENT = "content"
+    PAID_ADS = "paid_ads"
+    OUTBOUND_SEQUENCE = "outbound_sequence"
+    PARTNER = "partner"

@@ -1,0 +1,112 @@
+{% extends "_base.html" %}
+
+{% block title %}{{ lead.full_name }} | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<p><a href="/ui/leads">&larr; Leads一覧に戻る</a></p>
+<h1>{{ lead.full_name }}</h1>
+<p class="subtitle">
+  {{ lead.company_name }}{% if lead.title %} / {{ lead.title }}{% endif %} /
+  {{ lead_status_labels.get(lead.status, lead.status) }}
+  {% if lead.source_channel %} / {{ source_channel_labels.get(lead.source_channel, lead.source_channel) }}{% endif %}
+</p>
+
+<!-- スコア -->
+<div class="card">
+  <h2>スコア <span class="quadrant-badge quadrant-{{ score.quadrant }}">{{ score.quadrant }}</span></h2>
+  <div class="field-row">
+    <div>
+      <p class="subtitle" style="margin-bottom:4px;">Company Score(この会社は狙うべき対象か)</p>
+      <div style="font-size:28px; font-weight:800; font-family:ui-monospace,monospace;">{{ score.company_score }}</div>
+      <ul style="font-size:12px; color:#4b5563; padding-left:18px; margin-top:6px;">
+        {% for r in score.company_reasons %}<li>{{ r }}</li>{% endfor %}
+        {% if not score.company_reasons %}<li class="muted">加点要因なし</li>{% endif %}
+      </ul>
+    </div>
+    <div>
+      <p class="subtitle" style="margin-bottom:4px;">Person Score(今どれだけ反応しているか)</p>
+      <div style="font-size:28px; font-weight:800; font-family:ui-monospace,monospace;">{{ score.person_score }}</div>
+      <ul style="font-size:12px; color:#4b5563; padding-left:18px; margin-top:6px;">
+        {% for r in score.person_reasons %}<li>{{ r }}</li>{% endfor %}
+        {% if not score.person_reasons %}<li class="muted">加点要因なし</li>{% endif %}
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ライフサイクル -->
+<div class="card">
+  <h2>ステータス</h2>
+  {% if lead.status in ["converted", "disqualified"] %}
+    <p class="muted">
+      {% if lead.status == "converted" %}
+        案件化済み。<a href="/ui/engagements/{{ lead.converted_engagement_id }}">案件を見る &rarr;</a>
+      {% else %}
+        対象外: {{ lead.disqualify_reason }}
+      {% endif %}
+    </p>
+  {% else %}
+    {% if suggest_mql and lead.status == "working" %}
+    <div class="flash flash-success" style="margin: -4px -4px 14px; border-radius: 6px;">
+      スコアが閾値を超えました。MQLへの昇格を検討してください。
+    </div>
+    {% endif %}
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      {% if next_status %}
+      <form method="post" action="/ui/leads/{{ lead.id }}/advance" class="inline">
+        <button type="submit" class="btn btn-sm">{{ next_status[1] }}</button>
+      </form>
+      {% endif %}
+      {% if lead.status == "sql" %}
+      <form method="post" action="/ui/leads/{{ lead.id }}/convert" class="inline">
+        <button type="submit" class="btn btn-sm quick-btn">案件化する</button>
+      </form>
+      {% endif %}
+      <details>
+        <summary style="cursor:pointer; font-size:13px; color:#6b7280; padding-top:6px;">対象外にする</summary>
+        <form method="post" action="/ui/leads/{{ lead.id }}/disqualify" style="margin-top:8px; max-width:360px;">
+          <label for="reason">理由</label>
+          <textarea id="reason" name="reason" required placeholder="例: 予算なし・対象業種外"></textarea>
+          <button type="submit" class="btn btn-secondary btn-sm">対象外にする</button>
+        </form>
+      </details>
+    </div>
+  {% endif %}
+</div>
+
+<!-- 接点(Touch) -->
+<div class="card">
+  <h2>接点({{ touches | length }}件)</h2>
+  <details style="margin-bottom:14px;">
+    <summary style="cursor:pointer; font-size:13px; color:#2563eb;">+ 接点を記録する</summary>
+    <form method="post" action="/ui/leads/{{ lead.id }}/touches" style="margin-top:10px; max-width:360px;">
+      <label for="channel">種別</label>
+      <select id="channel" name="channel">
+        {% for c in touch_channels %}
+        <option value="{{ c.value }}">{{ touch_channel_labels.get(c.value, c.value) }}</option>
+        {% endfor %}
+      </select>
+      <label for="note">メモ(任意)</label>
+      <textarea id="note" name="note"></textarea>
+      <button type="submit" class="btn btn-sm">記録する</button>
+    </form>
+  </details>
+  {% if touches %}
+  <table>
+    <thead><tr><th>日時</th><th>種別</th><th>メモ</th><th>取り込み元</th></tr></thead>
+    <tbody>
+      {% for t in touches %}
+      <tr>
+        <td class="mono" style="font-size:11px;">{{ t.occurred_at.strftime("%Y-%m-%d %H:%M") }}</td>
+        <td>{{ touch_channel_labels.get(t.channel, t.channel) }}</td>
+        <td>{{ t.raw_payload.get("note", "") if t.raw_payload else "" }}</td>
+        <td class="muted">{{ t.source_system }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">まだ接点が記録されていません。</div>
+  {% endif %}
+</div>
+{% endblock %}

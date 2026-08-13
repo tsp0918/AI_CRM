@@ -1,0 +1,41 @@
+{% extends "_base.html" %}
+
+{% block title %}Leads | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<h1>Leads</h1>
+<p class="subtitle">{{ rows | length }} 件。Marketing/Inside Sales の見込み客(案件化前)。</p>
+<p style="margin-bottom:16px;"><a href="/ui/leads/new" class="btn btn-sm">+ Leadを登録</a></p>
+
+{% if rows %}
+<div class="card" style="padding:0;">
+  <table>
+    <thead>
+      <tr>
+        <th>氏名</th><th>会社</th><th>ステータス</th><th>象限</th>
+        <th>Company</th><th>Person</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td><a href="/ui/leads/{{ row.lead.id }}">{{ row.lead.full_name }}</a></td>
+        <td>{{ row.lead.company_name }}</td>
+        <td>{{ lead_status_labels.get(row.lead.status, row.lead.status) }}</td>
+        <td><span class="quadrant-badge quadrant-{{ row.score.quadrant }}">{{ row.score.quadrant }}</span></td>
+        <td class="mono">{{ row.score.company_score }}</td>
+        <td class="mono">{{ row.score.person_score }}</td>
+        <td><a href="/ui/leads/{{ row.lead.id }}">詳細 &rarr;</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card">
+  <div class="empty-state">
+    まだLeadがありません。<a href="/ui/leads/new">+ Leadを登録</a> から作成してください。
+  </div>
+</div>
+{% endif %}
+{% endblock %}

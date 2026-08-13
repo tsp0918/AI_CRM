@@ -41,6 +41,11 @@ class Engagement(Base, UUIDPk, Timestamped, TenantScoped):
     external_system: Mapped[str | None] = mapped_column(String(32))
     external_id: Mapped[str | None] = mapped_column(String(128))
 
+    # Lead→案件化の出自を永続化する(Leadがアーカイブされても ROI 帰属を追える)。
+    originating_lead_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("lead.id", ondelete="SET NULL"), index=True
+    )
+
     slots: Mapped[list["QualificationSlot"]] = relationship(
         back_populates="engagement", cascade="all, delete-orphan"
     )

@@ -179,6 +179,15 @@
     .quick-btn { background: #059669; }
     .quick-btn:hover { background: #047857; }
 
+    .quadrant-badge {
+      display: inline-flex; align-items: center; font-weight: 700;
+      border-radius: 6px; padding: 2px 9px; font-size: 12px;
+    }
+    .quadrant-hot { background: #dcfce7; color: #166534; }
+    .quadrant-watch { background: #fef3c7; color: #92400e; }
+    .quadrant-nurture { background: #dbeafe; color: #1e40af; }
+    .quadrant-low { background: #f3f4f6; color: #6b7280; }
+
     /* モバイル: 商談直後・移動中でも崩れず、タップしやすいサイズを保つ */
     @media (max-width: 640px) {
       .topnav { flex-wrap: wrap; height: auto; padding: 10px 14px; row-gap: 8px; }
@@ -204,6 +213,7 @@
       提案承認{% if pending_count %}<span class="badge-count">{{ pending_count }}</span>{% endif %}
     </a>
     <a href="/ui/forecast-risk" class="{% if active_nav == 'forecast_risk' %}active{% endif %}">リスクレーダー</a>
+    <a href="/ui/leads" class="{% if active_nav == 'leads' %}active{% endif %}">Leads</a>
     <a href="/ui/quick-note" class="{% if active_nav == 'quick_note' %}active{% endif %}">⚡ クイック入力</a>
     <a href="/ui/engagements/new" class="{% if active_nav == 'new' %}active{% endif %}">+ 新規案件</a>
     <div class="topnav-spacer"></div>

@@ -1,0 +1,50 @@
+{% extends "_base.html" %}
+
+{% block title %}Lead登録 | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<p><a href="/ui/leads">&larr; Leads一覧に戻る</a></p>
+<h1>Leadを登録する</h1>
+<p class="subtitle">案件化する前の見込み客。会社名・氏名だけで登録できます。</p>
+
+<div class="card" style="max-width: 520px;">
+  <form method="post" action="/ui/leads/new">
+    <div class="field-row">
+      <div>
+        <label for="company_name">会社名</label>
+        <input type="text" id="company_name" name="company_name" required placeholder="例: 山田電子工業株式会社">
+      </div>
+      <div>
+        <label for="full_name">氏名</label>
+        <input type="text" id="full_name" name="full_name" required placeholder="例: 山田 太郎">
+      </div>
+    </div>
+    <div class="field-row">
+      <div>
+        <label for="title">役職(任意)</label>
+        <input type="text" id="title" name="title" placeholder="例: 購買部長">
+      </div>
+      <div>
+        <label for="email">メールアドレス(任意)</label>
+        <input type="text" id="email" name="email" placeholder="例: yamada@example.com">
+      </div>
+    </div>
+    <div class="field-row">
+      <div>
+        <label for="phone">電話番号(任意)</label>
+        <input type="text" id="phone" name="phone">
+      </div>
+      <div>
+        <label for="source_channel">獲得経路(任意)</label>
+        <select id="source_channel" name="source_channel">
+          <option value="">未設定</option>
+          {% for c in source_channels %}
+          <option value="{{ c.value }}">{{ c.value }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <button type="submit" class="btn">登録する</button>
+  </form>
+</div>
+{% endblock %}
