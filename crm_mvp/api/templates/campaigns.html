@@ -9,7 +9,7 @@
 {% if rows %}
 <div class="card" style="padding:0;">
   <table>
-    <thead><tr><th>名前</th><th>種別</th><th>担当チーム</th><th>リード数</th><th>案件化数</th></tr></thead>
+    <thead><tr><th>名前</th><th>種別</th><th>担当チーム</th><th>リード数</th><th>案件化数</th><th>転換率</th></tr></thead>
     <tbody>
       {% for row in rows %}
       <tr>
@@ -18,6 +18,16 @@
         <td class="muted">{{ row.campaign.owner_team or "—" }}</td>
         <td class="mono">{{ row.lead_count }}</td>
         <td class="mono">{{ row.converted_count }}</td>
+        <td>
+          {% if row.lead_count %}
+          <div class="rate-bar">
+            <div class="rate-track"><span class="rate-fill" style="width:{{ row.conversion_rate }}%;"></span></div>
+            <span class="rate-pct">{{ row.conversion_rate }}%</span>
+          </div>
+          {% else %}
+          <span class="muted">—</span>
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>

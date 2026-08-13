@@ -40,20 +40,28 @@ def campaigns_list(
         .order_by(Campaign.created_at.desc())
     ).scalars().all()
 
+    # campaign毎に2クエリ(N+1)ではなく、GROUP BYでテナント全体を2クエリで
+    # まとめて集計する。
+    lead_counts = dict(session.execute(
+        select(Lead.source_campaign_id, func.count()).where(
+            Lead.tenant_id == ui_session.tenant_id, Lead.source_campaign_id.is_not(None),
+        ).group_by(Lead.source_campaign_id)
+    ).all())
+    converted_counts = dict(session.execute(
+        select(Lead.source_campaign_id, func.count()).where(
+            Lead.tenant_id == ui_session.tenant_id, Lead.source_campaign_id.is_not(None),
+            Lead.status == "converted",
+        ).group_by(Lead.source_campaign_id)
+    ).all())
+
     rows = []
     for c in campaigns:
-        lead_count = session.execute(
-            select(func.count()).select_from(Lead).where(
-                Lead.tenant_id == ui_session.tenant_id, Lead.source_campaign_id == c.id,
-            )
-        ).scalar_one()
-        converted_count = session.execute(
-            select(func.count()).select_from(Lead).where(
-                Lead.tenant_id == ui_session.tenant_id, Lead.source_campaign_id == c.id,
-                Lead.status == "converted",
-            )
-        ).scalar_one()
-        rows.append({"campaign": c, "lead_count": lead_count, "converted_count": converted_count})
+        lead_count = lead_counts.get(c.id, 0)
+        converted_count = converted_counts.get(c.id, 0)
+        rows.append({
+            "campaign": c, "lead_count": lead_count, "converted_count": converted_count,
+            "conversion_rate": round(converted_count / lead_count * 100) if lead_count else 0,
+        })
 
     context = base_context(
         session, ui_session, active_nav="campaigns", flash=flash, flash_type=flash_type,

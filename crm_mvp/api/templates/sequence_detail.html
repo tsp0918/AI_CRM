@@ -26,6 +26,9 @@
 
   <h2 style="margin-top:18px;">ステップ到達率</h2>
   {% for row in funnel.steps %}
+  {% set reviewed = row.entries | selectattr("draft.status", "equalto", "reviewed") | list | length %}
+  {% set dismissed = row.entries | selectattr("draft.status", "equalto", "dismissed") | list | length %}
+  {% set still_draft = row.entries | selectattr("draft.status", "equalto", "draft") | list | length %}
   <div class="funnel-row">
     <div class="funnel-label">
       ステップ{{ row.step.step_order + 1 }}
@@ -36,6 +39,14 @@
     </div>
     <div class="funnel-pct">{{ row.reached_count }} / {{ funnel.total_enrolled }}({{ row.reached_pct }}%)</div>
   </div>
+  {% if row.entries %}
+  <p class="subtitle" style="margin:-4px 0 10px 172px; font-size:12px;">
+    このステップの内訳:
+    {% if reviewed %}<span class="badge badge-gate-ok">対応済み {{ reviewed }}</span>{% endif %}
+    {% if dismissed %}<span class="badge badge-gate-block">見送り {{ dismissed }}</span>{% endif %}
+    {% if still_draft %}<span class="badge">下書き {{ still_draft }}</span>{% endif %}
+  </p>
+  {% endif %}
   {% endfor %}
 </div>
 
@@ -46,20 +57,23 @@
     <span class="muted" style="font-size:13px; font-weight:normal;">到達 {{ row.reached_count }}件</span>
   </h2>
   {% if row.entries %}
-  <table>
-    <thead><tr><th>リード</th><th>会社</th><th>ステータス</th><th>このステップの状態</th><th>生成日時</th></tr></thead>
-    <tbody>
-      {% for entry in row.entries %}
-      <tr>
-        <td>{% if entry.lead %}<a href="/ui/leads/{{ entry.lead.id }}">{{ entry.lead.full_name }}</a>{% else %}—{% endif %}</td>
-        <td>{{ entry.lead.company_name if entry.lead else "—" }}</td>
-        <td>{{ lead_status_labels.get(entry.lead.status, entry.lead.status) if entry.lead else "—" }}</td>
-        <td>{{ entry.draft.status }}</td>
-        <td class="mono" style="font-size:11px;">{{ entry.draft.generated_at.strftime("%Y-%m-%d %H:%M") }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <details>
+    <summary style="cursor:pointer; font-size:13px; color:#2563eb;">到達したリード一覧を見る({{ row.entries | length }}件)</summary>
+    <table style="margin-top:10px;">
+      <thead><tr><th>リード</th><th>会社</th><th>ステータス</th><th>このステップの状態</th><th>生成日時</th></tr></thead>
+      <tbody>
+        {% for entry in row.entries %}
+        <tr>
+          <td>{% if entry.lead %}<a href="/ui/leads/{{ entry.lead.id }}">{{ entry.lead.full_name }}</a>{% else %}—{% endif %}</td>
+          <td>{{ entry.lead.company_name if entry.lead else "—" }}</td>
+          <td>{{ lead_status_labels.get(entry.lead.status, entry.lead.status) if entry.lead else "—" }}</td>
+          <td>{{ draft_status_labels.get(entry.draft.status, entry.draft.status) }}</td>
+          <td class="mono" style="font-size:11px;">{{ entry.draft.generated_at.strftime("%Y-%m-%d %H:%M") }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </details>
   {% else %}
   <div class="empty-state">まだ到達したリードがいません。</div>
   {% endif %}

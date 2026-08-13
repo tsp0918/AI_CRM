@@ -69,6 +69,39 @@ class TestCampaignsList:
         assert resp.status_code == 200
         assert "集計テスト" in resp.text
 
+    def test_shows_conversion_rate(self, ui_client, db_session, tenant_id):
+        from crm_mvp.models import Lead
+
+        ui_client.post(
+            "/ui/campaigns/new", data={"name": "転換率テスト", "channel_type": "content"},
+        )
+        campaign = db_session.query(Campaign).filter_by(
+            tenant_id=tenant_id, name="転換率テスト",
+        ).one()
+
+        lead1 = Lead(
+            tenant_id=tenant_id, company_name="A社", full_name="担当A",
+            source_campaign_id=campaign.id, status="converted", written_by="human:tester",
+        )
+        lead2 = Lead(
+            tenant_id=tenant_id, company_name="B社", full_name="担当B",
+            source_campaign_id=campaign.id, status="new", written_by="human:tester",
+        )
+        db_session.add_all([lead1, lead2])
+        db_session.commit()
+
+        resp = ui_client.get("/ui/campaigns")
+        assert resp.status_code == 200
+        assert "50%" in resp.text
+
+    def test_zero_leads_shows_dash_not_error(self, ui_client, db_session, tenant_id):
+        ui_client.post(
+            "/ui/campaigns/new", data={"name": "リード無しテスト", "channel_type": "content"},
+        )
+        resp = ui_client.get("/ui/campaigns")
+        assert resp.status_code == 200
+        assert "リード無しテスト" in resp.text
+
 
 class TestLeadCampaignAssignment:
     def test_lead_creation_stores_campaign(self, ui_client, db_session, tenant_id):

@@ -17,6 +17,45 @@ def make_lead(db_session, tenant_id, **overrides) -> Lead:
     return lead
 
 
+class TestSequenceList:
+    def test_shows_enrollment_count_and_reach_rate(self, ui_client, db_session, tenant_id):
+        ui_client.post(
+            "/ui/sequences/new",
+            data={
+                "name": "一覧効果測定用",
+                "channel_0": "email", "delay_days_0": "0", "body_0": "{{full_name}}様",
+            },
+        )
+        sequence = db_session.query(Sequence).filter_by(
+            tenant_id=tenant_id, name="一覧効果測定用",
+        ).one()
+        lead = make_lead(db_session, tenant_id)
+        db_session.commit()
+
+        ui_client.post(
+            "/ui/leads/bulk-enroll",
+            data={"lead_ids": [str(lead.id)], "sequence_id": str(sequence.id)},
+        )
+        ui_client.post("/ui/sequences/generate-due")
+
+        resp = ui_client.get("/ui/sequences")
+        assert resp.status_code == 200
+        assert "最終ステップ到達率" in resp.text
+        assert "100%" in resp.text
+
+    def test_no_enrollments_shows_dash(self, ui_client, db_session, tenant_id):
+        ui_client.post(
+            "/ui/sequences/new",
+            data={
+                "name": "未登録シーケンス",
+                "channel_0": "email", "delay_days_0": "0", "body_0": "{{full_name}}様",
+            },
+        )
+        resp = ui_client.get("/ui/sequences")
+        assert resp.status_code == 200
+        assert "未登録シーケンス" in resp.text
+
+
 class TestSequenceCreation:
     def test_creates_sequence_with_steps_from_fixed_rows(self, ui_client, db_session, tenant_id):
         resp = ui_client.post(
@@ -319,6 +358,36 @@ class TestSequenceDetail:
         assert "鈴木 一郎" in resp.text
         assert "佐藤 花子" in resp.text
         assert "2 / 2" in resp.text  # ステップ1到達率
+
+    def test_review_status_shown_as_japanese_label_not_raw_enum(
+        self, ui_client, db_session, tenant_id,
+    ):
+        ui_client.post(
+            "/ui/sequences/new",
+            data={
+                "name": "ラベル確認用",
+                "channel_0": "email", "delay_days_0": "0", "body_0": "{{full_name}}様",
+            },
+        )
+        sequence = db_session.query(Sequence).filter_by(
+            tenant_id=tenant_id, name="ラベル確認用",
+        ).one()
+        lead = make_lead(db_session, tenant_id, full_name="review テスト")
+        db_session.commit()
+
+        ui_client.post(
+            "/ui/leads/bulk-enroll",
+            data={"lead_ids": [str(lead.id)], "sequence_id": str(sequence.id)},
+        )
+        ui_client.post("/ui/sequences/generate-due")
+        draft = db_session.query(SequenceDraft).join(SequenceEnrollment).filter(
+            SequenceEnrollment.lead_id == lead.id,
+        ).one()
+        ui_client.post(f"/ui/leads/{lead.id}/drafts/{draft.id}/review")
+
+        resp = ui_client.get(f"/ui/sequences/{sequence.id}")
+        assert resp.status_code == 200
+        assert "対応済み" in resp.text
 
     def test_other_tenant_sequence_is_404(self, ui_client, db_session):
         import uuid

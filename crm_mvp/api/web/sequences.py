@@ -30,6 +30,9 @@ router = APIRouter(tags=["web"])
 STEP_CHANNEL_LABELS = {
     "email": "メール", "call_task": "架電タスク", "linkedin": "LinkedIn",
 }
+DRAFT_STATUS_LABELS = {
+    "draft": "下書き", "reviewed": "対応済み", "dismissed": "見送り",
+}
 
 # シーケンス作成フォームは固定5行(JSなしで組める現実的な上限)。
 MAX_STEP_ROWS = 5
@@ -71,7 +74,15 @@ def sequences_list(
                 SequenceEnrollment.status == SequenceEnrollmentStatus.ACTIVE,
             )
         ).scalar_one()
-        rows.append({"sequence": seq, "step_count": step_count, "active_count": active_count})
+        # 最終ステップまでの到達率を簡易的な効果指標として一覧に出す
+        # (詳細画面のファネルを軽量に呼び出すだけ — シーケンス数は少ない
+        # 前提で、step_count/active_countと同程度のコスト感を許容する)。
+        funnel = sequence_funnel(session, ui_session.tenant_id, seq.id)
+        final_reach_pct = funnel["steps"][-1]["reached_pct"] if funnel["steps"] else 0
+        rows.append({
+            "sequence": seq, "step_count": step_count, "active_count": active_count,
+            "total_enrolled": funnel["total_enrolled"], "final_reach_pct": final_reach_pct,
+        })
 
     context = base_context(
         session, ui_session, active_nav="sequences", flash=flash, flash_type=flash_type,
@@ -156,5 +167,6 @@ def sequence_detail(
         "sequence": sequence, "funnel": funnel,
         "step_channel_labels": STEP_CHANNEL_LABELS,
         "lead_status_labels": LEAD_STATUS_LABELS,
+        "draft_status_labels": DRAFT_STATUS_LABELS,
     })
     return templates.TemplateResponse(request, "sequence_detail.html", context)

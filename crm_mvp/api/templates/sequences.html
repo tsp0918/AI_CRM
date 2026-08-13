@@ -18,7 +18,7 @@
 {% if rows %}
 <div class="card" style="padding:0;">
   <table>
-    <thead><tr><th>名前</th><th>説明</th><th>ステップ数</th><th>実行中</th></tr></thead>
+    <thead><tr><th>名前</th><th>説明</th><th>ステップ数</th><th>実行中</th><th>登録数</th><th>最終ステップ到達率</th></tr></thead>
     <tbody>
       {% for row in rows %}
       <tr>
@@ -26,6 +26,17 @@
         <td class="muted">{{ row.sequence.description or "—" }}</td>
         <td class="mono">{{ row.step_count }}</td>
         <td class="mono">{{ row.active_count }}</td>
+        <td class="mono">{{ row.total_enrolled }}</td>
+        <td>
+          {% if row.total_enrolled %}
+          <div class="rate-bar">
+            <div class="rate-track"><span class="rate-fill" style="width:{{ row.final_reach_pct }}%;"></span></div>
+            <span class="rate-pct">{{ row.final_reach_pct }}%</span>
+          </div>
+          {% else %}
+          <span class="muted">—</span>
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>
