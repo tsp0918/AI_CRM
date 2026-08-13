@@ -4,14 +4,17 @@ import os
 import uuid
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from crm_mvp.enums import Confidence, Criterion
 from crm_mvp.models import QualificationSlot
 
+# §7.4: crm_app は非 superuser ロール。RLS は superuser を無条件に
+# 素通りするため、admin ロール(owner)で接続すると分離が検証されない
+# まま通ってしまう。テストも本番同様 crm_app 経由で RLS を通す。
 DATABASE_URL = os.environ.get(
-    "DATABASE_URL", "postgresql+psycopg://localhost:5432/crm_mvp"
+    "DATABASE_URL", "postgresql+psycopg://crm_app@localhost:5432/crm_mvp"
 )
 
 
@@ -21,11 +24,30 @@ def new_id():
 
 
 @pytest.fixture
-def db_session():
+def tenant_id() -> uuid.UUID:
+    return uuid.uuid4()
+
+
+def set_tenant_context(session: Session, tenant_id: uuid.UUID) -> None:
+    """§7.4: RLS のテナント文脈を明示的に切り替える。
+
+    db_session は tenant_id フィクスチャの値で自動設定されるが、1テスト内で
+    複数テナントを扱う場合(例: test_seed_policies_db.py の独立性テスト)は
+    この関数で都度切り替えること。
+    """
+    # SET は値にバインドパラメータを取れないため set_config() を使う。
+    session.execute(
+        text("SELECT set_config('app.current_tenant_id', :tid, false)"),
+        {"tid": str(tenant_id)},
+    )
+
+
+@pytest.fixture
+def db_session(tenant_id):
     """外側トランザクションをテスト後に必ずロールバックする DB セッション。
 
-    seed_policies の投入関数など DB に触れるロジックのテスト用。
-    PostgreSQL に接続できない環境では自動的にスキップする。
+    §7.4: RLS が参照する app.current_tenant_id を tenant_id フィクスチャの
+    値で既定設定する。PostgreSQL に接続できない環境では自動的にスキップする。
     """
     try:
         engine = create_engine(DATABASE_URL)
@@ -35,6 +57,7 @@ def db_session():
 
     trans = connection.begin()
     session = Session(bind=connection, join_transaction_mode="create_savepoint")
+    set_tenant_context(session, tenant_id)
     try:
         yield session
     finally:
@@ -42,11 +65,6 @@ def db_session():
         trans.rollback()
         connection.close()
         engine.dispose()
-
-
-@pytest.fixture
-def tenant_id() -> uuid.UUID:
-    return uuid.uuid4()
 
 
 @pytest.fixture

@@ -20,6 +20,7 @@ from ..models import (
     Engagement, EngagementRole, ExtractionProposal, GraphEdge,
     QualificationSlot,
 )
+from .decay_policy import compute_decays_at
 from .extraction_pipeline import confidence_for_ai_write
 from .graph_resolution import resolve_or_create_node
 from .stage_transitions import recompute_derived_close_date
@@ -81,11 +82,14 @@ def _apply_qualification_slot(
         )
         session.add(slot)
 
+    asserted_at = datetime.now(timezone.utc)
     slot.value = value
     slot.confidence = confidence_for_ai_write(existing_confidence)
     slot.evidence_source_id = proposal.source_id
     slot.evidence_quote = proposal.evidence_quote
-    slot.asserted_at = datetime.now(timezone.utc)
+    slot.asserted_at = asserted_at
+    # §7.1: 再確認のたびに失効日時を criterion 別の基準で引き直す
+    slot.decays_at = compute_decays_at(criterion, asserted_at)
     slot.written_by = f"ai:proposal:{proposal.id}"
     slot.source_id = proposal.source_id
     session.flush()

@@ -20,7 +20,7 @@ from ..models import IngestionSource
 from ..ports.extractor import ExtractorPort
 from ..ports.stt import STTPort, UnavailableSTT
 from ..services.ingestion_runner import ProcessingOutcome, process_source
-from .deps import get_extractor, get_session, get_tenant_id
+from .deps import get_extractor, get_tenant_id, get_tenant_scoped_session
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
@@ -59,7 +59,7 @@ class ProcessResult(BaseModel):
 def create_source(
     body: SourceCreate,
     tenant_id: uuid.UUID = Depends(get_tenant_id),
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_tenant_scoped_session),
 ) -> IngestionSource:
     if body.engagement_id is None and body.account_id is None:
         raise HTTPException(
@@ -83,7 +83,7 @@ def process_source_endpoint(
     source_id: uuid.UUID,
     body: ProcessRequest,
     tenant_id: uuid.UUID = Depends(get_tenant_id),
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_tenant_scoped_session),
     extractor: ExtractorPort = Depends(get_extractor),
 ) -> ProcessingOutcome:
     source = session.execute(

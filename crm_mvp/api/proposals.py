@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from ..enums import ProposalStatus
 from ..models import ExtractionProposal
 from ..services.apply_proposal import apply_proposal
-from .deps import get_session, get_tenant_id
+from .deps import get_tenant_id, get_tenant_scoped_session
 
 router = APIRouter(prefix="/proposals", tags=["proposals"])
 
@@ -65,7 +65,7 @@ def _get_pending_proposal(
 def accept_proposal(
     proposal_id: uuid.UUID, body: AcceptRequest,
     tenant_id: uuid.UUID = Depends(get_tenant_id),
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_tenant_scoped_session),
 ) -> ExtractionProposal:
     proposal = _get_pending_proposal(session, tenant_id, proposal_id)
     try:
@@ -85,7 +85,7 @@ def accept_proposal(
 def reject_proposal(
     proposal_id: uuid.UUID, body: RejectRequest,
     tenant_id: uuid.UUID = Depends(get_tenant_id),
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_tenant_scoped_session),
 ) -> ExtractionProposal:
     proposal = _get_pending_proposal(session, tenant_id, proposal_id)
     proposal.status = ProposalStatus.REJECTED

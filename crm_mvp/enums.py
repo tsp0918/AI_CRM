@@ -138,3 +138,10 @@ class AutonomyMode(StrEnum):
     AUTO_IF_TRUSTED = "auto_if_trusted"   # 承認率が閾値を超えたら自動適用
     ALWAYS_AUTO = "always_auto"
     NEVER_AI = "never_ai"                 # AI 書き込み禁止（VERIFIED 等）
+
+
+class VerificationMethod(StrEnum):
+    """§7.2: VERIFIED への昇格経路。標準は顧客文書、代替は上長確認。"""
+
+    CUSTOMER_DOCUMENT = "customer_document"   # 標準: 顧客発の文書・発言の添付
+    MANAGER_CONFIRMATION = "manager_confirmation"  # 代替: 上長による確認

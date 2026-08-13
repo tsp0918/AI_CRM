@@ -1,12 +1,9 @@
-"""PipelineSnapshot 日次バッチの投入コマンド(HANDOVER.md §5 item18)。
+"""PipelineSnapshot 保持期間ロールアップの投入コマンド(HANDOVER.md §7.6)。
 
-  python scripts/daily_snapshot.py --tenant-id <uuid> [--date YYYY-MM-DD]
+  python scripts/rollup_snapshots.py --tenant-id <uuid> [--date YYYY-MM-DD]
 
-cron 等の外部スケジューラから日次で実行する想定(本コマンド自体はスケジューラを
-含まない)。同日分は冪等にスキップされるため、リトライしても重複しない。
-
-§7.4: テナント分離は RLS に確定済み。crm_app ロール(非 superuser)で
-接続し、対象テナントの session 変数を SET してから実行する。
+決定(2026-08-13): 日次90日 → 週次1年 → 月次永年。cron 等で週次実行する想定
+(日次バッチほど頻繁に回す必要はない)。何度実行しても安全(冪等)。
 """
 
 from __future__ import annotations
@@ -19,7 +16,7 @@ import uuid
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
-from crm_mvp.services.snapshot import create_daily_snapshots
+from crm_mvp.services.snapshot_rollup import rollup_snapshots
 
 DEFAULT_DATABASE_URL = "postgresql+psycopg://crm_app@localhost:5432/crm_mvp"
 
@@ -43,10 +40,14 @@ def main() -> None:
             text("SELECT set_config('app.current_tenant_id', :tid, false)"),
             {"tid": str(args.tenant_id)},
         )
-        created = create_daily_snapshots(session, args.tenant_id, args.date)
+        outcome = rollup_snapshots(session, args.tenant_id, args.date)
         session.commit()
 
-    print(f"pipeline_snapshot: {created} 件作成 (tenant_id={args.tenant_id})")
+    print(
+        f"pipeline_snapshot: 日次→週次 {outcome.daily_rows_collapsed} 件削除, "
+        f"週次→月次 {outcome.weekly_rows_collapsed} 件削除 "
+        f"(tenant_id={args.tenant_id})"
+    )
 
 
 if __name__ == "__main__":

@@ -285,3 +285,89 @@ class TestGraph:
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("image/svg+xml")
         assert b"<svg" in resp.content
+
+
+class TestVerifySlot:
+    def _make_slot(self, db_session, tenant_id, engagement, criterion, **kw):
+        from crm_mvp.enums import Confidence
+        from crm_mvp.models import QualificationSlot
+
+        slot = QualificationSlot(
+            tenant_id=tenant_id, engagement_id=engagement.id, criterion=criterion,
+            value={"amount": 1}, confidence=Confidence.CORROBORATED, **kw,
+        )
+        db_session.add(slot)
+        db_session.flush()
+        db_session.commit()
+        return slot
+
+    def test_customer_document_requires_evidence_uri(
+        self, api_client, db_session, tenant_id,
+    ):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        self._make_slot(db_session, tenant_id, engagement, "budget")
+
+        resp = api_client.post(
+            f"/engagements/{engagement.id}/slots/budget/verify",
+            json={"verified_by": str(uuid.uuid4()), "method": "customer_document"},
+        )
+        assert resp.status_code == 422
+
+    def test_customer_document_promotes_to_verified(
+        self, api_client, db_session, tenant_id,
+    ):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        self._make_slot(db_session, tenant_id, engagement, "budget")
+        verifier = uuid.uuid4()
+
+        resp = api_client.post(
+            f"/engagements/{engagement.id}/slots/budget/verify",
+            json={
+                "verified_by": str(verifier), "method": "customer_document",
+                "evidence_uri": "s3://bucket/customer-email.eml",
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["confidence"] == "verified"
+        assert body["verified_by"] == str(verifier)
+        assert body["decays_at"] is not None
+
+    def test_manager_confirmation_requires_note(
+        self, api_client, db_session, tenant_id,
+    ):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        self._make_slot(db_session, tenant_id, engagement, "budget")
+
+        resp = api_client.post(
+            f"/engagements/{engagement.id}/slots/budget/verify",
+            json={"verified_by": str(uuid.uuid4()), "method": "manager_confirmation"},
+        )
+        assert resp.status_code == 422
+
+    def test_manager_confirmation_with_note_succeeds(
+        self, api_client, db_session, tenant_id,
+    ):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        self._make_slot(db_session, tenant_id, engagement, "budget")
+
+        resp = api_client.post(
+            f"/engagements/{engagement.id}/slots/budget/verify",
+            json={
+                "verified_by": str(uuid.uuid4()), "method": "manager_confirmation",
+                "note": "課長が顧客電話で予算確保済みと確認",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["confidence"] == "verified"
+
+    def test_missing_slot_returns_404(self, api_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        resp = api_client.post(
+            f"/engagements/{engagement.id}/slots/budget/verify",
+            json={
+                "verified_by": str(uuid.uuid4()), "method": "manager_confirmation",
+                "note": "x",
+            },
+        )
+        assert resp.status_code == 404

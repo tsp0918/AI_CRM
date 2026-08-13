@@ -14,7 +14,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..base import Base, Provenance, TenantScoped, Timestamped, UUIDPk
-from ..enums import CONFIDENCE_ORDER, Confidence, Criterion
+from ..enums import CONFIDENCE_ORDER, Confidence, Criterion, VerificationMethod
 
 
 class QualificationSlot(Base, UUIDPk, Timestamped, Provenance, TenantScoped):
@@ -46,6 +46,16 @@ class QualificationSlot(Base, UUIDPk, Timestamped, Provenance, TenantScoped):
     decays_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), index=True
     )
+
+    # §7.2: VERIFIED への昇格記録。/verify エンドポイント経由でのみ人が書く。
+    # evidence_uri は §3.7 に従い参照のみ（顧客文書の本文はコピーしない）。
+    evidence_uri: Mapped[str | None] = mapped_column(String(512))
+    verification_method: Mapped[VerificationMethod | None] = mapped_column(
+        String(32)
+    )
+    verification_note: Mapped[str | None] = mapped_column(Text)
+    verified_by: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     engagement: Mapped["Engagement"] = relationship(back_populates="slots")
 

@@ -249,50 +249,65 @@ AI_TM の `required_params - known_params = missing` と同じ骨格。
 
 ## 7. 残論点（実装前に人間の判断が必要）
 
-### 7.1 `decays_at` の既定値
+### 7.1 `decays_at` の既定値 — 決定済み(2026-08-13)
 
-人事異動基準（4月・10月）にすると日本企業の実態に合うが、
-案件によっては短すぎる。予算期基準だと長すぎる。
-**暫定案**: 業種テンプレートのパラメータとし、criterion ごとに別値を持つ
-（`economic_buyer` は人事異動基準、`budget` は予算期基準など）。
+criterion ごとに別基準を採用: `economic_buyer` / `champion` は人事異動基準
+（次の4月・10月）、`budget` は予算期基準（次の決算期末、既定3月末）、
+その他は固定日数（`timing` 90日 / `competition` 120日 / それ以外 180日）。
+`crm_mvp/services/decay_policy.py` に実装し、`apply_proposal.py` の
+`_apply_qualification_slot` と `/engagements/{id}/slots/{criterion}/verify`
+の両方から適用のたびに引き直す。
 
-### 7.2 `verified` の定義
+### 7.2 `verified` の定義 — 決定済み(2026-08-13)
 
-「顧客が発した文書・発言が添付されていること」を機械的要件にするか、
-「上長が確認したこと」にするか。
-**暫定案**: 前者を標準、後者を代替経路として置く。
-ただし現場に証跡を残す習慣がない場合は通らないため、実態確認が必要。
+暫定案どおり採用: 顧客文書・発言の添付（`evidence_uri`）を標準、
+上長確認（`verification_note`）を代替経路として許容する。
+`POST /engagements/{id}/slots/{criterion}/verify` が唯一の昇格経路
+（`ExtractionProposal` を経由しない、人のみが呼べるエンドポイント）。
+`VerificationMethod` enum、`QualificationSlot.evidence_uri` /
+`verification_method` / `verification_note` / `verified_by` /
+`verified_at` を追加。
 
-### 7.3 `stance` / `influence` のエクスポート時マスク
+### 7.3 `stance` / `influence` のエクスポート時マスク — 実装済み(2026-08-13)
 
-実在の個人に対する主観評価であり、取引先本人が閲覧しうる資料への混入、
-退職者による持ち出し、開示請求のリスクがある。
-**方針は決定済み**: モデル層ではなく**シリアライザ層で既定 ON**。
-後付けだと必ず漏れる。実装時に必ず入れること。
+方針どおりシリアライザ層で既定マスク。`graph_export.build_graph_json` /
+`build_graph_dot` に `include_sensitive: bool = False` を追加し、
+JSON API・SVG・Jinja 画面(`/ui/graph`)すべてで既定非表示。
+明示的に `include_sensitive=true` を渡した場合のみ表示し、Jinja 画面には
+「取引先に渡す資料には含めないでください」の警告を表示する。
 
-### 7.4 テナント分離の方式
+### 7.4 テナント分離の方式 — 決定済み(2026-08-13): Row-Level Security
 
-`FieldAutonomyPolicy` のみ `tenant_id` を持つ状態。
-Row-Level Security か、スキーマ分離か、DB 分離か未決。
-エンタープライズ製造業向けなら **schema 分離が要求される可能性が高い**。
+全16テーブルに RLS ポリシーを設定（`tenant_id = current_setting('app.current_tenant_id')`）。
+**重要な実装上の発見**: ローカル DB ユーザーが superuser だったため
+`FORCE ROW LEVEL SECURITY` を付けても RLS が素通りしていた
+（superuser は RLS を無条件にバイパスする Postgres の仕様で回避不可）。
+非 superuser ロール `crm_app` を新設し(`scripts/provision_app_role.sql`)、
+アプリケーション・運用スクリプトはこのロールで接続する。Alembic
+マイグレーション(DDL)は引き続き所有者ロールで実行する。
+`crm_mvp/api/deps.py` の `get_tenant_scoped_session` がリクエストごとに
+`SET LOCAL` 相当(`set_config(..., true)`)でテナント文脈を設定する。
+アプリ層の `WHERE tenant_id = ...` フィルタは多層防御として維持。
 
-### 7.5 `evidence_score` の算出式
+### 7.5 `evidence_score` の算出式 — 暫定式を実装済み、正式決定は引き続き未定
 
-`PipelineSnapshot.evidence_score` の定義が未決。
-加重フォーキャストの基礎になるため、ステージ確率ではなく
-**証拠強度の分布から算出する**方針だけ決まっている。
+`crm_mvp/services/snapshot.py` の `compute_evidence_score` に暫定式
+（有効な QualificationSlot の証拠強度ランクの平均）を実装。
+正式な算出式は未決のままで、差し替え可能な形にしてある。
 
-### 7.6 スナップショットの保持期間
+### 7.6 スナップショットの保持期間 — 決定済み(2026-08-13)
 
-日次で全件積むため、テナント規模次第で肥大化する。
-日次→週次→月次のロールアップ方針を決める必要がある。
+日次90日 → 週次1年 → 月次永年のロールアップを採用。
+`crm_mvp/services/snapshot_rollup.py` に実装（集計ではなく間引き —
+状態値は合算できないため各期間の最新1件を代表値として残す）。
+`scripts/rollup_snapshots.py` で週次実行を想定。
 
 ### 7.7 課金モデル
 
 シート課金だと AI 処理コストと利益が逆相関する。
 Salesforce が work-unit 課金へ移行しようとしているのは同じ構造。
 プロダクト設計には直結しないが、`ExtractionProposal` の件数が
-自然な課金メトリクスになりうることは念頭に置く。
+自然な課金メトリクスになりうることは念頭に置く。（未着手）
 
 ---
 

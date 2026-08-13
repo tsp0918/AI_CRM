@@ -106,3 +106,22 @@ class TestApplyQualificationSlotPaperProcessTriggersCloseDate:
             criterion=Criterion.PAPER_PROCESS,
         ).one()
         assert slot.value == {"approval_layers": 3, "legal_review_required": True}
+
+
+class TestApplyQualificationSlotSetsDecaysAt:
+    def test_sets_decays_at_per_criterion_policy(self, db_session, tenant_id):
+        """§7.1: 適用のたびに criterion 別の失効基準で decays_at を引き直す。"""
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        proposal = _make_proposal(
+            db_session, tenant_id, engagement,
+            "qualification_slot", "criterion:timing",
+            {"target_date": "2026-12-01"},
+        )
+        apply_proposal(db_session, proposal)
+
+        slot = db_session.query(QualificationSlot).filter_by(
+            tenant_id=tenant_id, engagement_id=engagement.id,
+            criterion=Criterion.TIMING,
+        ).one()
+        assert slot.decays_at is not None
+        assert (slot.decays_at - slot.asserted_at).days == 90

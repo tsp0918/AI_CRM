@@ -22,7 +22,7 @@ from ..enums import ComplianceCheckType, ComplianceOutcome
 from ..models import Account, ComplianceStatus
 from ..ports.screening import ScreeningPort
 from ..services.idempotency import compute_idempotency_key
-from .deps import get_screening_port, get_session, get_tenant_id
+from .deps import get_screening_port, get_tenant_id, get_tenant_scoped_session
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
@@ -51,7 +51,7 @@ class ComplianceCheckOut(BaseModel):
 def submit_compliance_check(
     account_id: uuid.UUID, body: ComplianceCheckRequest,
     tenant_id: uuid.UUID = Depends(get_tenant_id),
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_tenant_scoped_session),
     screening: ScreeningPort = Depends(get_screening_port),
 ) -> dict:
     account = session.get(Account, account_id)

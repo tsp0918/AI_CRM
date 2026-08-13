@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from ..enums import ComplianceCheckType, ComplianceOutcome, Stage
 from ..models import Account, ComplianceStatus, Engagement
-from .deps import get_session, get_tenant_id
+from .deps import get_tenant_id, get_tenant_scoped_session
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
@@ -38,7 +38,7 @@ class ComplianceJudgmentPayload(BaseModel):
 def receive_compliance_judgment(
     body: ComplianceJudgmentPayload,
     tenant_id: uuid.UUID = Depends(get_tenant_id),
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_tenant_scoped_session),
 ) -> None:
     status = session.execute(
         select(ComplianceStatus).where(
@@ -89,7 +89,7 @@ NON_TERMINAL_STAGES = [
 def receive_sanctions_list_update(
     body: SanctionsListUpdatedPayload,
     tenant_id: uuid.UUID = Depends(get_tenant_id),
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_tenant_scoped_session),
 ) -> ReevaluationOut:
     """制裁リスト更新時の遡及再評価(HANDOVER.md §5 item21)。
 

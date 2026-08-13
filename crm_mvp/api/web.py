@@ -18,6 +18,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..models import Account, Engagement
@@ -85,6 +86,14 @@ def _load_graph(
         engagement_id = uuid.UUID(engagement_id_raw)
     except ValueError:
         return {"error": "tenant_id / engagement_id は UUID 形式で入力してください"}
+
+    # §7.4: RLS ポリシーが参照する session 変数をこの画面用にも設定する
+    # (このルーターだけ X-Tenant-Id ヘッダを使わないため deps.get_tenant_scoped_session
+    # を経由できず、tenant_id が判明した時点でここで直接 SET する)。
+    session.execute(
+        text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
+        {"tenant_id": str(tenant_id)},
+    )
 
     engagement = session.get(Engagement, engagement_id)
     if engagement is None or engagement.tenant_id != tenant_id:
