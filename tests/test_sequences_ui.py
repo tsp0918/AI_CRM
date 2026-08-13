@@ -47,6 +47,37 @@ class TestSequenceCreation:
         assert steps[0].channel == "email"
         assert steps[1].channel == "call_task"
 
+    def test_creates_sequence_with_branching_config(self, ui_client, db_session, tenant_id):
+        resp = ui_client.post(
+            "/ui/sequences/new",
+            data={
+                "name": "分岐あり", "description": "",
+                "channel_0": "email", "delay_days_0": "0",
+                "body_0": "{{full_name}}様、初回メール",
+                "reaction_channels_0": ["email_click", "content_download"],
+                "on_reaction_next_0": "2", "on_no_reaction_next_0": "1",
+                "channel_1": "call_task", "delay_days_1": "3",
+                "body_1": "反応なしフォロー架電",
+                "channel_2": "email", "delay_days_2": "1",
+                "body_2": "ホットパスメール",
+                "on_no_reaction_next_2": "end",
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+
+        sequence = db_session.query(Sequence).filter_by(
+            tenant_id=tenant_id, name="分岐あり",
+        ).one()
+        steps = db_session.query(SequenceStep).filter_by(
+            tenant_id=tenant_id, sequence_id=sequence.id,
+        ).order_by(SequenceStep.step_order).all()
+
+        assert steps[0].on_reaction_next_order == 2
+        assert steps[0].on_no_reaction_next_order == 1
+        assert set(steps[0].reaction_channels) == {"email_click", "content_download"}
+        assert steps[2].on_no_reaction_next_order == -1
+
     def test_blank_name_is_rejected(self, ui_client, db_session, tenant_id):
         resp = ui_client.post(
             "/ui/sequences/new",
@@ -170,3 +201,90 @@ class TestLeadSequenceEnrollment:
         assert resp.status_code == 303
         db_session.refresh(draft)
         assert draft.status == "dismissed"
+
+
+class TestBulkEnroll:
+    def _make_sequence(self, ui_client, name="Bulk1"):
+        ui_client.post(
+            "/ui/sequences/new",
+            data={
+                "name": name,
+                "channel_0": "email", "delay_days_0": "0",
+                "body_0": "{{full_name}}様、こんにちは",
+            },
+        )
+
+    def test_enrolls_multiple_leads_at_once(self, ui_client, db_session, tenant_id):
+        self._make_sequence(ui_client)
+        lead1 = make_lead(db_session, tenant_id, full_name="鈴木 一郎")
+        lead2 = make_lead(db_session, tenant_id, full_name="佐藤 花子")
+        db_session.commit()
+        sequence = db_session.query(Sequence).filter_by(tenant_id=tenant_id, name="Bulk1").one()
+
+        resp = ui_client.post(
+            "/ui/leads/bulk-enroll",
+            data={"lead_ids": [str(lead1.id), str(lead2.id)], "sequence_id": str(sequence.id)},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+
+        enrollments = db_session.query(SequenceEnrollment).filter_by(
+            tenant_id=tenant_id, sequence_id=sequence.id,
+        ).all()
+        assert {e.lead_id for e in enrollments} == {lead1.id, lead2.id}
+
+    def test_skips_already_enrolled_leads(self, ui_client, db_session, tenant_id):
+        self._make_sequence(ui_client, name="Bulk2")
+        lead = make_lead(db_session, tenant_id)
+        db_session.commit()
+        sequence = db_session.query(Sequence).filter_by(tenant_id=tenant_id, name="Bulk2").one()
+
+        ui_client.post(f"/ui/leads/{lead.id}/sequences", data={"sequence_id": str(sequence.id)})
+
+        resp = ui_client.post(
+            "/ui/leads/bulk-enroll",
+            data={"lead_ids": [str(lead.id)], "sequence_id": str(sequence.id)},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert db_session.query(SequenceEnrollment).filter_by(
+            tenant_id=tenant_id, lead_id=lead.id,
+        ).count() == 1
+
+    def test_no_leads_selected_is_rejected(self, ui_client, db_session, tenant_id):
+        self._make_sequence(ui_client, name="Bulk3")
+        sequence = db_session.query(Sequence).filter_by(tenant_id=tenant_id, name="Bulk3").one()
+
+        resp = ui_client.post(
+            "/ui/leads/bulk-enroll",
+            data={"sequence_id": str(sequence.id)},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert "flash_type=error" in resp.headers["location"]
+
+
+class TestPipelineView:
+    def test_shows_step_positions_after_progressing(self, ui_client, db_session, tenant_id):
+        ui_client.post(
+            "/ui/sequences/new",
+            data={
+                "name": "3ステップ表示確認",
+                "channel_0": "email", "delay_days_0": "0", "body_0": "{{full_name}}様1通目",
+                "channel_1": "call_task", "delay_days_1": "3", "body_1": "架電",
+                "channel_2": "email", "delay_days_2": "4", "body_2": "{{full_name}}様3通目",
+            },
+        )
+        lead = make_lead(db_session, tenant_id)
+        db_session.commit()
+        sequence = db_session.query(Sequence).filter_by(
+            tenant_id=tenant_id, name="3ステップ表示確認",
+        ).one()
+
+        ui_client.post(f"/ui/leads/{lead.id}/sequences", data={"sequence_id": str(sequence.id)})
+        ui_client.post("/ui/sequences/generate-due")  # ステップ1生成
+
+        resp = ui_client.get(f"/ui/leads/{lead.id}")
+        assert resp.status_code == 200
+        assert "実行中" in resp.text
+        assert "未到達" in resp.text

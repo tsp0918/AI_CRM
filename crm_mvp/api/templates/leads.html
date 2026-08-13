@@ -8,10 +8,12 @@
 <p style="margin-bottom:16px;"><a href="/ui/leads/new" class="btn btn-sm">+ Leadを登録</a></p>
 
 {% if rows %}
+<form method="post" action="/ui/leads/bulk-enroll" id="bulk-enroll-form">
 <div class="card" style="padding:0;">
   <table>
     <thead>
       <tr>
+        <th style="width:24px;"></th>
         <th>氏名</th><th>会社</th><th>ステータス</th><th>象限</th>
         <th>Company</th><th>Person</th><th></th>
       </tr>
@@ -19,6 +21,7 @@
     <tbody>
       {% for row in rows %}
       <tr>
+        <td><input type="checkbox" name="lead_ids" value="{{ row.lead.id }}"></td>
         <td><a href="/ui/leads/{{ row.lead.id }}">{{ row.lead.full_name }}</a></td>
         <td>{{ row.lead.company_name }}</td>
         <td>{{ lead_status_labels.get(row.lead.status, row.lead.status) }}</td>
@@ -31,6 +34,24 @@
     </tbody>
   </table>
 </div>
+
+{% if available_sequences %}
+<div class="card">
+  <p class="subtitle" style="margin-bottom:10px;">選択したLeadを一括でシーケンスに登録する</p>
+  <div class="field-row" style="align-items:end; max-width:480px;">
+    <div>
+      <label for="sequence_id">シーケンス</label>
+      <select id="sequence_id" name="sequence_id" style="margin-bottom:14px;">
+        {% for s in available_sequences %}
+        <option value="{{ s.id }}">{{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="btn btn-sm" style="margin-bottom:14px;">選択したLeadを登録</button>
+  </div>
+</div>
+{% endif %}
+</form>
 {% else %}
 <div class="card">
   <div class="empty-state">

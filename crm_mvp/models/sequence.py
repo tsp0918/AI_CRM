@@ -14,6 +14,7 @@ from datetime import datetime
 from sqlalchemy import (
     Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base, Provenance, TenantScoped, Timestamped, UUIDPk
@@ -42,10 +43,21 @@ class SequenceStep(Base, UUIDPk, TenantScoped):
     )
     step_order: Mapped[int] = mapped_column(Integer)
     channel: Mapped[SequenceStepChannel] = mapped_column(String(16))
-    # 前ステップ(1件目は登録時点)からの遅延日数。
+    # 前ステップ(1件目は登録時点)からの遅延日数。分岐先として選ばれた
+    # 場合も、その先の待機時間としてこの値をそのまま使う。
     delay_days: Mapped[int] = mapped_column(Integer, default=0)
     subject_template: Mapped[str | None] = mapped_column(String(255))
     body_template: Mapped[str] = mapped_column(Text)
+
+    # 前ステップの反応に応じた分岐(ロードマップ§7の「適応的な次の一手」を
+    # 簡易な形で実現)。reaction_channels に該当する Touch がこのステップの
+    # ドラフト生成後に観測されたら on_reaction_next_order へ、
+    # 観測されなければ on_no_reaction_next_order へ進む。両方 NULL なら
+    # 常定どおり step_order+1 に進む。値は次のステップの step_order、
+    # -1 は「ここでシーケンスを終了する」を意味する。
+    reaction_channels: Mapped[list] = mapped_column(JSONB, default=list)
+    on_reaction_next_order: Mapped[int | None] = mapped_column(Integer)
+    on_no_reaction_next_order: Mapped[int | None] = mapped_column(Integer)
 
     __table_args__ = (
         UniqueConstraint("sequence_id", "step_order", name="uq_sequence_step_order"),
@@ -63,8 +75,8 @@ class SequenceEnrollment(Base, UUIDPk, Timestamped, Provenance, TenantScoped):
     lead_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("lead.id", ondelete="CASCADE"), index=True
     )
-    # 次に生成すべき SequenceStep.step_order の位置(0-indexed)。
-    current_step_order: Mapped[int] = mapped_column(Integer, default=0)
+    # 直近に生成したステップの step_order。まだ1件も生成していなければ NULL。
+    current_step_order: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[SequenceEnrollmentStatus] = mapped_column(
         String(16), default=SequenceEnrollmentStatus.ACTIVE, index=True
     )

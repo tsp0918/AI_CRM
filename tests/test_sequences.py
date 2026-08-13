@@ -108,7 +108,7 @@ class TestCreateSequenceAndEnroll:
         db_session.commit()
 
         assert enrollment.status == SequenceEnrollmentStatus.ACTIVE
-        assert enrollment.current_step_order == 0
+        assert enrollment.current_step_order is None  # まだ1件も生成していない
         # 1件目の delay_days=0 なのですぐ発火可能
         assert enrollment.next_action_at == NOW
 
@@ -141,8 +141,8 @@ class TestGenerateDueDrafts:
         assert len(drafts) == 1
         assert drafts[0].channel == "email"
         db_session.refresh(enrollment)
-        assert enrollment.current_step_order == 1
-        assert enrollment.next_action_at == NOW + timedelta(days=3)
+        assert enrollment.current_step_order == 0  # 直近に生成したステップの order
+        assert enrollment.next_action_at == NOW + timedelta(days=3)  # ステップ2(call_task)のdelay
 
     def test_not_due_yet_generates_nothing(self, db_session, tenant_id):
         lead = make_lead(db_session, tenant_id)
@@ -193,6 +193,87 @@ class TestGenerateDueDrafts:
 
         drafts = sq.generate_due_drafts(db_session, tenant_id, now=NOW)
         assert "content_download" in drafts[0].body
+
+
+class TestBranching:
+    def _branching_steps(self):
+        return [
+            {  # order 0: 高関心度シグナルがあれば order2(ホットパス)へ、無ければ order1へ
+                "channel": SequenceStepChannel.EMAIL, "delay_days": 0,
+                "body_template": "{{full_name}}様、初回メール",
+                "reaction_channels": [TouchChannel.EMAIL_CLICK, TouchChannel.CONTENT_DOWNLOAD],
+                "on_reaction_next_order": 2, "on_no_reaction_next_order": 1,
+            },
+            {  # order 1: 反応が無かった場合のデフォルトフォロー(架電)
+                "channel": SequenceStepChannel.CALL_TASK, "delay_days": 3,
+                "body_template": "{{full_name}}様へ架電する(反応なしフォロー)。",
+            },
+            {  # order 2: 反応があった場合のホットパス
+                "channel": SequenceStepChannel.EMAIL, "delay_days": 1,
+                "subject_template": "ぜひ一度お話ししましょう",
+                "body_template": "{{full_name}}様、ご関心ありがとうございます(ホットパス)。",
+            },
+        ]
+
+    def test_reacted_jumps_to_reaction_target(self, db_session, tenant_id):
+        lead = make_lead(db_session, tenant_id)
+        sequence = sq.create_sequence(
+            db_session, tenant_id, name="分岐S", description=None,
+            steps=self._branching_steps(), actor="human:m",
+        )
+        sq.enroll_lead(db_session, tenant_id, lead, sequence, actor="human:m", now=NOW)
+        db_session.flush()
+        sq.generate_due_drafts(db_session, tenant_id, now=NOW)  # order0生成
+
+        record_touch(
+            db_session, tenant_id, lead, channel=TouchChannel.CONTENT_DOWNLOAD,
+            occurred_at=NOW + timedelta(hours=1),
+        )
+        db_session.flush()
+
+        drafts = sq.generate_due_drafts(db_session, tenant_id, now=NOW + timedelta(days=3))
+        assert len(drafts) == 1
+        assert "ホットパス" in drafts[0].body  # order2(反応ありパス)に飛んだ
+
+    def test_no_reaction_takes_default_no_reaction_path(self, db_session, tenant_id):
+        lead = make_lead(db_session, tenant_id)
+        sequence = sq.create_sequence(
+            db_session, tenant_id, name="分岐S", description=None,
+            steps=self._branching_steps(), actor="human:m",
+        )
+        sq.enroll_lead(db_session, tenant_id, lead, sequence, actor="human:m", now=NOW)
+        db_session.flush()
+        sq.generate_due_drafts(db_session, tenant_id, now=NOW)  # order0生成、反応なし
+
+        drafts = sq.generate_due_drafts(db_session, tenant_id, now=NOW + timedelta(days=3))
+        assert len(drafts) == 1
+        assert "反応なしフォロー" in drafts[0].body  # order1(反応なしパス)に飛んだ
+
+    def test_sequence_end_sentinel_completes_immediately(self, db_session, tenant_id):
+        lead = make_lead(db_session, tenant_id)
+        sequence = sq.create_sequence(
+            db_session, tenant_id, name="即終了S", description=None,
+            steps=[{
+                "channel": SequenceStepChannel.EMAIL, "delay_days": 0,
+                "body_template": "{{full_name}}",
+                "reaction_channels": [TouchChannel.EMAIL_CLICK],
+                "on_no_reaction_next_order": sq.SEQUENCE_END,
+            }],
+            actor="human:m",
+        )
+        enrollment = sq.enroll_lead(db_session, tenant_id, lead, sequence, actor="human:m", now=NOW)
+        db_session.flush()
+        sq.generate_due_drafts(db_session, tenant_id, now=NOW)  # order0生成(delay_days=0固有ステップのみ→即next_action_atなし想定)
+
+        # order0以降に既定ステップが無いため、order0自身のdelay_days(0)で
+        # 次回チェックがスケジュールされる。反応なしのままチェックすると終了する。
+        db_session.refresh(enrollment)
+        assert enrollment.next_action_at is not None
+
+        drafts = sq.generate_due_drafts(db_session, tenant_id, now=NOW + timedelta(hours=1))
+        assert drafts == []
+        db_session.refresh(enrollment)
+        assert enrollment.status == SequenceEnrollmentStatus.COMPLETED
 
 
 class TestReviewAndDismiss:

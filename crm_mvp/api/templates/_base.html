@@ -188,6 +188,24 @@
     .quadrant-nurture { background: #dbeafe; color: #1e40af; }
     .quadrant-low { background: #f3f4f6; color: #6b7280; }
 
+    /* シーケンスのパイプライン進捗ステッパー */
+    .pipeline { display: flex; align-items: flex-start; gap: 0; margin: 10px 0 6px; overflow-x: auto; padding-bottom: 4px; }
+    .pipeline-step { display: flex; flex-direction: column; align-items: center; min-width: 108px; position: relative; }
+    .pipeline-step:not(:last-child)::after {
+      content: ""; position: absolute; top: 13px; left: 60%; width: 90%; height: 2px;
+      background: #e5e7eb; z-index: 0;
+    }
+    .pipeline-dot {
+      width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center;
+      justify-content: center; font-size: 11px; font-weight: 700; z-index: 1;
+      background: #f9fafb; color: #9ca3af; border: 2px solid #e5e7eb;
+    }
+    .pipeline-step.done .pipeline-dot { background: #dcfce7; border-color: #16a34a; color: #166534; }
+    .pipeline-step.current .pipeline-dot { background: #2563eb; border-color: #2563eb; color: white; }
+    .pipeline-step.skipped .pipeline-dot { background: #fee2e2; border-color: #fca5a5; color: #991b1b; }
+    .pipeline-label { font-size: 11px; margin-top: 6px; text-align: center; color: #4b5563; max-width: 104px; }
+    .pipeline-label .ch { display: block; color: #9ca3af; font-size: 10px; }
+
     /* モバイル: 商談直後・移動中でも崩れず、タップしやすいサイズを保つ */
     @media (max-width: 640px) {
       .topnav { flex-wrap: wrap; height: auto; padding: 10px 14px; row-gap: 8px; }

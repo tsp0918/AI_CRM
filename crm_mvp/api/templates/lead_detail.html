@@ -136,25 +136,40 @@
   {% endif %}
 
   {% if enrollments %}
-  <table style="margin-bottom:16px;">
-    <thead><tr><th>シーケンス</th><th>状態</th><th>次の実行予定</th><th></th></tr></thead>
-    <tbody>
-      {% for e in enrollments %}
-      <tr>
-        <td>{{ sequence_names.get(e.sequence_id, "—") }}</td>
-        <td>{{ e.status }}</td>
-        <td class="mono" style="font-size:11px;">{{ e.next_action_at.strftime("%Y-%m-%d") if e.next_action_at else "—" }}</td>
-        <td>
-          {% if e.status == active_enrollment_status %}
-          <form method="post" action="/ui/leads/{{ lead.id }}/sequences/{{ e.id }}/opt-out" class="inline">
-            <button type="submit" class="btn btn-sm btn-secondary">登録解除</button>
-          </form>
-          {% endif %}
-        </td>
-      </tr>
+  {% for e in enrollments %}
+  <div style="border-top:1px solid #eee; padding:14px 0;">
+    <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px;">
+      <div>
+        <strong>{{ sequence_names.get(e.sequence_id, "—") }}</strong>
+        <span class="muted" style="font-size:12px;">
+          {{ e.status }}
+          {% if e.next_action_at %} / 次の実行予定 {{ e.next_action_at.strftime("%Y-%m-%d") }}{% endif %}
+        </span>
+      </div>
+      {% if e.status == active_enrollment_status %}
+      <form method="post" action="/ui/leads/{{ lead.id }}/sequences/{{ e.id }}/opt-out" class="inline">
+        <button type="submit" class="btn btn-sm btn-secondary">登録解除</button>
+      </form>
+      {% endif %}
+    </div>
+
+    <div class="pipeline">
+      {% for row in pipelines.get(e.id, []) %}
+      <div class="pipeline-step {{ row.status }}">
+        <div class="pipeline-dot">
+          {% if row.status == "done" %}✓{% elif row.status == "skipped" %}—{% else %}{{ row.step.step_order + 1 }}{% endif %}
+        </div>
+        <div class="pipeline-label">
+          {{ step_channel_labels.get(row.step.channel, row.step.channel) }}
+          <span class="ch">
+            {% if row.status == "current" %}実行中{% elif row.status == "done" %}完了({{ row.draft.status }}){% elif row.status == "skipped" %}分岐でスキップ{% else %}未到達{% endif %}
+          </span>
+        </div>
+      </div>
       {% endfor %}
-    </tbody>
-  </table>
+    </div>
+  </div>
+  {% endfor %}
   {% endif %}
 
   {% if drafts %}

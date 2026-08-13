@@ -57,9 +57,12 @@ def wipe_lead_data(session: Session) -> None:
 
 
 def build_demo_sequence(session: Session):
+    """3ステップ + 分岐。ステップ0への反応(クリック/資料DL)があれば
+    架電をスキップしてホットパス(order2)へ、無ければ既定の架電フォロー
+    (order1)へ進む。"""
     return create_sequence(
         session, TENANT_ID, name="製造業 新規開拓 3ステップ",
-        description="資料DL・問い合わせ後のフォローアップ想定",
+        description="資料DL・問い合わせ後のフォローアップ想定(反応で分岐)",
         steps=[
             {
                 "channel": SequenceStepChannel.EMAIL, "delay_days": 0,
@@ -69,6 +72,9 @@ def build_demo_sequence(session: Session):
                     "拝見し、ご連絡いたしました。導入事例など詳しい資料をお送り"
                     "できますが、一度お話しする機会をいただけますでしょうか。"
                 ),
+                "reaction_channels": [TouchChannel.EMAIL_CLICK, TouchChannel.CONTENT_DOWNLOAD],
+                "on_reaction_next_order": 2,  # 反応ありならホットパスへ直行
+                "on_no_reaction_next_order": 1,  # 反応なしなら既定どおり架電へ
             },
             {
                 "channel": SequenceStepChannel.CALL_TASK, "delay_days": 3,
@@ -77,11 +83,12 @@ def build_demo_sequence(session: Session):
                 ),
             },
             {
-                "channel": SequenceStepChannel.EMAIL, "delay_days": 4,
-                "subject_template": "その後の状況はいかがでしょうか",
+                "channel": SequenceStepChannel.EMAIL, "delay_days": 1,
+                "subject_template": "ぜひ一度お話ししましょう",
                 "body_template": (
-                    "{{full_name}}様\n\n先日はご検討のお時間をいただきありがとう"
-                    "ございました。ご不明点があればいつでもご連絡ください。"
+                    "{{full_name}}様\n\nご関心をお寄せいただきありがとうございます。"
+                    "{{recent_signal}}を拝見し、ぜひ一度お話しできればと存じます。"
+                    "今週中でご都合の良い日時はございますか。"
                 ),
             },
         ],
@@ -90,8 +97,10 @@ def build_demo_sequence(session: Session):
 
 
 def build_lead_hot(session: Session, sequence) -> Lead:
-    """Hot: 高関心度の接点2件 + 役職マッチ。シーケンスを2ステップ分進める
-    (1件目レビュー済み、2件目は未対応のドラフトのまま)。"""
+    """Hot: 高関心度の接点複数 + 役職マッチ。ステップ0への反応(メール内
+    リンクのクリック)を記録し、分岐でステップ1(架電)を飛ばしてステップ2
+    (ホットパス)まで進める — 「step2まで実行が進んだ状態」の実行済みビュー。
+    """
     lead = Lead(
         tenant_id=TENANT_ID, company_name="関東鋳造株式会社", full_name="小林 直樹",
         title="生産技術部長", email="kobayashi@example.com",
@@ -112,15 +121,23 @@ def build_lead_hot(session: Session, sequence) -> Lead:
     )
 
     enroll_lead(session, TENANT_ID, lead, sequence, actor=f"human:{ACTOR_ID}", now=days_ago(5))
-    first_drafts = generate_due_drafts(session, TENANT_ID, now=days_ago(5))
+    first_drafts = generate_due_drafts(session, TENANT_ID, now=days_ago(5))  # ステップ0生成
     mark_draft_reviewed(first_drafts[0], reviewed_by=f"human:{ACTOR_ID}", now=days_ago(4))
-    generate_due_drafts(session, TENANT_ID, now=days_ago(1))
+
+    # ステップ0メール送付後、本文中のリンクをクリック(=反応あり)
+    record_touch(
+        session, TENANT_ID, lead, channel=TouchChannel.EMAIL_CLICK,
+        occurred_at=days_ago(4), source_system="manual", actor="system",
+        raw_payload={"note": "案内メール内のリンクをクリック"},
+    )
+    generate_due_drafts(session, TENANT_ID, now=days_ago(2))  # 反応検知→架電を飛ばしてホットパス(order2)へ
     return lead
 
 
 def build_lead_watch(session: Session, sequence) -> Lead:
-    """Watch: 高関心度の接点はあるが1件のみ、役職不明。会社としては
-    反応があるが人物の反応度はまだ低い。"""
+    """Watch: 高関心度の接点はあるが1件のみ、役職不明。ステップ0への反応が
+    無いため、既定どおりステップ1(架電)まで進める — 分岐しなかった側の
+    パスを見せる対比。"""
     lead = Lead(
         tenant_id=TENANT_ID, company_name="三河バルブ工業株式会社", full_name="佐藤 健一",
         source_channel=LeadSourceChannel.OUTBOUND, status=LeadStatus.WORKING,
@@ -134,8 +151,9 @@ def build_lead_watch(session: Session, sequence) -> Lead:
         occurred_at=days_ago(3), source_system="manual", actor="system",
     )
 
-    enroll_lead(session, TENANT_ID, lead, sequence, actor=f"human:{ACTOR_ID}", now=days_ago(2))
-    generate_due_drafts(session, TENANT_ID, now=days_ago(2))
+    enroll_lead(session, TENANT_ID, lead, sequence, actor=f"human:{ACTOR_ID}", now=days_ago(3))
+    generate_due_drafts(session, TENANT_ID, now=days_ago(3))  # ステップ0生成、反応なし
+    generate_due_drafts(session, TENANT_ID, now=days_ago(0))  # 反応なし確定→ステップ1(架電)へ
     return lead
 
 

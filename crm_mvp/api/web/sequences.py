@@ -12,10 +12,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ...enums import SequenceEnrollmentStatus, SequenceStepChannel
+from ...enums import SequenceEnrollmentStatus, SequenceStepChannel, TouchChannel
 from ...models import Sequence, SequenceEnrollment, SequenceStep
-from ...services.sequences import create_sequence, generate_due_drafts
+from ...services.lead_scoring import HIGH_INTENT_CHANNELS
+from ...services.sequences import SEQUENCE_END, create_sequence, generate_due_drafts
 from .common import base_context, redirect_with_flash
+from .leads import TOUCH_CHANNEL_LABELS
 from .session import UiSession, get_ui_db_session, require_ui_session
 from .templates import templates
 
@@ -27,6 +29,14 @@ STEP_CHANNEL_LABELS = {
 
 # シーケンス作成フォームは固定5行(JSなしで組める現実的な上限)。
 MAX_STEP_ROWS = 5
+
+
+def _parse_branch_target(raw: str | None) -> int | None:
+    if not raw:
+        return None
+    if raw == "end":
+        return SEQUENCE_END
+    return int(raw)
 
 
 @router.get("/ui/sequences", response_class=HTMLResponse)
@@ -62,9 +72,14 @@ def sequences_list(
     context = base_context(
         session, ui_session, active_nav="sequences", flash=flash, flash_type=flash_type,
     )
-    context.update({"rows": rows, "step_channels": list(SequenceStepChannel),
-                     "step_channel_labels": STEP_CHANNEL_LABELS,
-                     "step_row_range": range(MAX_STEP_ROWS)})
+    context.update({
+        "rows": rows, "step_channels": list(SequenceStepChannel),
+        "step_channel_labels": STEP_CHANNEL_LABELS,
+        "step_row_range": range(MAX_STEP_ROWS),
+        "touch_channels": list(TouchChannel),
+        "touch_channel_labels": TOUCH_CHANNEL_LABELS,
+        "default_reaction_channels": {c.value for c in HIGH_INTENT_CHANNELS},
+    })
     return templates.TemplateResponse(request, "sequences.html", context)
 
 
@@ -91,6 +106,9 @@ async def sequence_new_submit(
             "delay_days": int(form.get(f"delay_days_{i}") or 0),
             "subject_template": (form.get(f"subject_{i}") or "").strip() or None,
             "body_template": body,
+            "reaction_channels": form.getlist(f"reaction_channels_{i}"),
+            "on_reaction_next_order": _parse_branch_target(form.get(f"on_reaction_next_{i}")),
+            "on_no_reaction_next_order": _parse_branch_target(form.get(f"on_no_reaction_next_{i}")),
         })
 
     if not steps:

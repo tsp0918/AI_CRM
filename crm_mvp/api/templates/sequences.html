@@ -50,7 +50,8 @@
     </div>
 
     <p class="subtitle" style="margin:14px 0 8px;">
-      ステップ(空欄の行は無視されます)。本文には {{ '{{full_name}}' }} / {{ '{{company_name}}' }} /
+      ステップは<strong>1行目から順に、途中を空欄にせず</strong>埋めてください(分岐先の
+      「ステップN」は行番号を指します)。本文には {{ '{{full_name}}' }} / {{ '{{company_name}}' }} /
       {{ '{{title}}' }} / {{ '{{recent_signal}}' }}(直近の高関心度シグナル)が使えます。
     </p>
     {% for i in step_row_range %}
@@ -74,6 +75,38 @@
       <input type="text" id="subject_{{ i }}" name="subject_{{ i }}">
       <label for="body_{{ i }}">本文</label>
       <textarea id="body_{{ i }}" name="body_{{ i }}" style="min-height:70px;"></textarea>
+
+      <div style="background:#fafbfc; border:1px solid #eee; border-radius:6px; padding:10px 12px; margin-top:8px;">
+        <p class="subtitle" style="margin:0 0 8px; font-size:12px;">
+          分岐(任意) — このステップへの反応の有無で次に進むステップを変える
+        </p>
+        <label for="reaction_channels_{{ i }}">「反応あり」とみなす接点(複数選択可)</label>
+        <select id="reaction_channels_{{ i }}" name="reaction_channels_{{ i }}" multiple size="4">
+          {% for c in touch_channels %}
+          <option value="{{ c.value }}" {% if c.value in default_reaction_channels %}selected{% endif %}>
+            {{ touch_channel_labels.get(c.value, c.value) }}
+          </option>
+          {% endfor %}
+        </select>
+        <div class="field-row">
+          <div>
+            <label for="on_reaction_next_{{ i }}">反応があれば次へ</label>
+            <select id="on_reaction_next_{{ i }}" name="on_reaction_next_{{ i }}">
+              <option value="">既定(次のステップ)</option>
+              {% for j in step_row_range %}<option value="{{ j }}">ステップ{{ j + 1 }}へ</option>{% endfor %}
+              <option value="end">ここで終了</option>
+            </select>
+          </div>
+          <div>
+            <label for="on_no_reaction_next_{{ i }}">反応がなければ次へ</label>
+            <select id="on_no_reaction_next_{{ i }}" name="on_no_reaction_next_{{ i }}">
+              <option value="">既定(次のステップ)</option>
+              {% for j in step_row_range %}<option value="{{ j }}">ステップ{{ j + 1 }}へ</option>{% endfor %}
+              <option value="end">ここで終了</option>
+            </select>
+          </div>
+        </div>
+      </div>
     </div>
     {% endfor %}
 

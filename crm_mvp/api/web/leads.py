@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from ...enums import (
     LeadSourceChannel, LeadStatus, SequenceEnrollmentStatus, TouchChannel,
 )
-from ...models import Account, Lead, Sequence, SequenceDraft, SequenceEnrollment
+from ...models import Account, Lead, Sequence, SequenceDraft, SequenceEnrollment, SequenceStep
 from ...services.lead_lifecycle import (
     convert_lead, disqualify_lead, list_touches, maybe_promote_to_mql,
     promote_lead, record_touch,
@@ -55,6 +55,38 @@ NEXT_STATUS: dict[str, tuple[str, str]] = {
 }
 
 
+def _pipeline_view(session: Session, tenant_id: uuid.UUID, enrollment: SequenceEnrollment) -> list[dict]:
+    """Enrollment 1件分のステップ進捗を可視化用に組み立てる。
+
+    ドラフトが存在するステップは実行済み(現在地は current の1件のみ)、
+    order が現在地以下でドラフトが無いものは分岐でスキップされたステップ、
+    それより先は未到達として区別する。
+    """
+    steps = session.execute(
+        select(SequenceStep).where(
+            SequenceStep.tenant_id == tenant_id, SequenceStep.sequence_id == enrollment.sequence_id,
+        ).order_by(SequenceStep.step_order)
+    ).scalars().all()
+    drafts = session.execute(
+        select(SequenceDraft).where(
+            SequenceDraft.tenant_id == tenant_id, SequenceDraft.enrollment_id == enrollment.id,
+        ).order_by(SequenceDraft.generated_at)
+    ).scalars().all()
+    draft_by_step_id = {d.step_id: d for d in drafts}
+
+    view = []
+    for step in steps:
+        draft = draft_by_step_id.get(step.id)
+        if draft is not None:
+            status = "current" if step.step_order == enrollment.current_step_order else "done"
+        elif enrollment.current_step_order is not None and step.step_order <= enrollment.current_step_order:
+            status = "skipped"
+        else:
+            status = "upcoming"
+        view.append({"step": step, "draft": draft, "status": status})
+    return view
+
+
 def _score_and_context(session: Session, tenant_id: uuid.UUID, lead: Lead) -> dict:
     account = session.get(Account, lead.matched_account_id) if lead.matched_account_id else None
     touches = list_touches(session, tenant_id, lead.id)
@@ -83,13 +115,57 @@ def leads_list(
         ctx = _score_and_context(session, ui_session.tenant_id, lead)
         rows.append({"lead": lead, "score": ctx["score"]})
 
+    available_sequences = session.execute(
+        select(Sequence).where(
+            Sequence.tenant_id == ui_session.tenant_id, Sequence.is_active.is_(True),
+        ).order_by(Sequence.name)
+    ).scalars().all()
+
     context = base_context(
         session, ui_session, active_nav="leads", flash=flash, flash_type=flash_type,
     )
     context.update({
         "rows": rows, "lead_status_labels": LEAD_STATUS_LABELS,
+        "available_sequences": available_sequences,
     })
     return templates.TemplateResponse(request, "leads.html", context)
+
+
+@router.post("/ui/leads/bulk-enroll")
+async def bulk_enroll_ui(
+    request: Request,
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> RedirectResponse:
+    form = await request.form()
+    lead_ids = form.getlist("lead_ids")
+    sequence_id = form.get("sequence_id")
+
+    if not lead_ids:
+        return redirect_with_flash("/ui/leads", "Leadを1件以上選択してください", "error")
+    if not sequence_id:
+        return redirect_with_flash("/ui/leads", "登録先のシーケンスを選択してください", "error")
+
+    sequence = session.get(Sequence, uuid.UUID(sequence_id))
+    if sequence is None or sequence.tenant_id != ui_session.tenant_id:
+        raise HTTPException(status_code=404, detail="sequence not found")
+
+    enrolled, skipped = 0, 0
+    for raw_id in lead_ids:
+        lead = session.get(Lead, uuid.UUID(raw_id))
+        if lead is None or lead.tenant_id != ui_session.tenant_id:
+            continue
+        try:
+            enroll_lead(session, ui_session.tenant_id, lead, sequence, actor=f"human:{ui_session.actor_id}")
+            enrolled += 1
+        except ValueError:
+            skipped += 1
+
+    session.commit()
+    message = f"{enrolled}件を「{sequence.name}」に登録しました"
+    if skipped:
+        message += f"(登録済みのため{skipped}件をスキップ)"
+    return redirect_with_flash("/ui/leads", message)
 
 
 @router.get("/ui/leads/new", response_class=HTMLResponse)
@@ -178,6 +254,9 @@ def lead_detail(
                 SequenceDraft.enrollment_id.in_(enrollment_ids),
             ).order_by(SequenceDraft.generated_at.desc())
         ).scalars().all()
+    pipelines = {
+        e.id: _pipeline_view(session, ui_session.tenant_id, e) for e in enrollments
+    }
 
     context = base_context(
         session, ui_session, active_nav="leads", flash=flash, flash_type=flash_type,
@@ -193,6 +272,7 @@ def lead_detail(
         "enrollments": enrollments, "sequence_names": sequence_names,
         "drafts": drafts, "step_channel_labels": STEP_CHANNEL_LABELS,
         "active_enrollment_status": SequenceEnrollmentStatus.ACTIVE,
+        "pipelines": pipelines,
     })
     return templates.TemplateResponse(request, "lead_detail.html", context)
 
