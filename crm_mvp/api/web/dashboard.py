@@ -73,7 +73,7 @@ def dashboard(
         })
 
     context = base_context(
-        session, ui_session, active_nav="dashboard", flash=flash, flash_type=flash_type,
+        session, ui_session, active_nav="dashboard", request=request, flash=flash, flash_type=flash_type,
     )
     context.update({
         "rows": rows,

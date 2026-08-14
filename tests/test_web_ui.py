@@ -78,6 +78,13 @@ class TestWorkspaceGating:
             app.dependency_overrides.pop(deps.get_session, None)
 
 
+def _main_content(resp_text: str) -> str:
+    """サイドバーには常設クイック入力ウィジェットの案件一覧が独立して
+    出るため(2026-08-14)、ページ本文だけを対象にした文字列比較をしたい
+    テストはこれで <main> 以降だけを取り出す。"""
+    return resp_text.split('<main class="page">', 1)[-1]
+
+
 class TestDashboard:
     def test_lists_engagements_for_current_tenant_only(
         self, ui_client, db_session, tenant_id,
@@ -92,8 +99,9 @@ class TestDashboard:
 
         resp = ui_client.get("/ui/")
         assert resp.status_code == 200
-        assert engagement.name in resp.text
-        assert resp.text.count("テスト案件") == 1
+        main = _main_content(resp.text)
+        assert engagement.name in main
+        assert main.count("テスト案件") == 1
 
     def test_hides_closed_deals_by_default(self, ui_client, db_session, tenant_id):
         create_account_and_engagement(db_session, tenant_id, stage=Stage.LEAD)
@@ -103,11 +111,11 @@ class TestDashboard:
 
         resp = ui_client.get("/ui/")
         assert resp.status_code == 200
-        assert "クローズ済み案件" not in resp.text
+        assert "クローズ済み案件" not in _main_content(resp.text)
 
         resp_all = ui_client.get("/ui/?show_closed=true")
         assert resp_all.status_code == 200
-        assert "クローズ済み案件" in resp_all.text
+        assert "クローズ済み案件" in _main_content(resp_all.text)
 
     def test_filters_by_owner_user_id(self, ui_client, db_session, tenant_id):
         from crm_mvp.models import User
@@ -132,8 +140,9 @@ class TestDashboard:
 
         resp = ui_client.get(f"/ui/?owner_user_id={user_a.id}")
         assert resp.status_code == 200
-        assert "Aの案件" in resp.text
-        assert "Bの案件" not in resp.text
+        main = _main_content(resp.text)
+        assert "Aの案件" in main
+        assert "Bの案件" not in main
 
 
 class TestEngagementCreation:
@@ -329,16 +338,45 @@ class TestQuickNote:
             tenant_id=tenant_id, engagement_id=engagement.id,
         ).count() == 0
 
-    def test_no_owner_filter_is_flat_list(self, ui_client, db_session, tenant_id):
+    def test_no_owner_filter_shows_recent_engagements(self, ui_client, db_session, tenant_id):
         _, engagement = create_account_and_engagement(db_session, tenant_id)
         db_session.commit()
 
         resp = ui_client.get("/ui/quick-note")
         assert resp.status_code == 200
-        assert "<optgroup" not in resp.text
         assert engagement.name in resp.text
 
-    def test_owner_filter_groups_into_optgroups(self, ui_client, db_session, tenant_id):
+    def test_set_owner_endpoint_sets_cookie_and_redirects_to_next(
+        self, ui_client, db_session, tenant_id,
+    ):
+        from crm_mvp.models import User
+
+        owner = User(
+            tenant_id=tenant_id, name="担当A", email="qn-a@example.com",
+            function="Sales", role="BDM",
+        )
+        db_session.add(owner)
+        db_session.commit()
+
+        resp = ui_client.post(
+            "/ui/quick-note/owner",
+            data={"owner_user_id": str(owner.id), "next": "/ui/leads"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/ui/leads"
+        assert ui_client.cookies.get("crm_quicknote_owner_id") == str(owner.id)
+
+    def test_set_owner_rejects_unsafe_next(self, ui_client, db_session, tenant_id):
+        resp = ui_client.post(
+            "/ui/quick-note/owner",
+            data={"owner_user_id": "", "next": "https://evil.example.com/"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/ui/"
+
+    def test_owner_cookie_truly_filters_engagement_list(self, ui_client, db_session, tenant_id):
         from crm_mvp.models import User
 
         owner = User(
@@ -354,17 +392,17 @@ class TestQuickNote:
         others.name = "他人の案件"
         db_session.commit()
 
-        resp = ui_client.get(f"/ui/quick-note?owner_user_id={owner.id}")
-        assert resp.status_code == 200
-        assert '<optgroup label="自分の担当">' in resp.text
-        assert '<optgroup label="その他(直近更新)">' in resp.text
-        own_section = resp.text.split('その他(直近更新)')[0]
-        assert "自分の案件" in own_section
-        assert "他人の案件" not in own_section
+        ui_client.post(
+            "/ui/quick-note/owner",
+            data={"owner_user_id": str(owner.id), "next": "/ui/quick-note"},
+        )
 
-    def test_owner_select_shows_all_users_and_marks_selected(
-        self, ui_client, db_session, tenant_id,
-    ):
+        resp = ui_client.get("/ui/quick-note")
+        assert resp.status_code == 200
+        assert "自分の案件" in resp.text
+        assert "他人の案件" not in resp.text
+
+    def test_owner_select_marks_selected_option(self, ui_client, db_session, tenant_id):
         from crm_mvp.models import User
 
         owner = User(
@@ -376,22 +414,16 @@ class TestQuickNote:
         create_account_and_engagement(db_session, tenant_id)
         db_session.commit()
 
-        resp = ui_client.get(f"/ui/quick-note?owner_user_id={owner.id}")
+        ui_client.post(
+            "/ui/quick-note/owner",
+            data={"owner_user_id": str(owner.id), "next": "/ui/quick-note"},
+        )
+
+        resp = ui_client.get("/ui/quick-note")
         assert resp.status_code == 200
-        assert 'id="owner_user_id"' in resp.text
         assert f'<option value="{owner.id}" selected>担当B</option>' in resp.text
 
-    def test_post_redirect_preserves_owner_user_id(
-        self, ui_client, db_session, tenant_id,
-    ):
-        from crm_mvp.models import User
-
-        owner = User(
-            tenant_id=tenant_id, name="担当C", email="qn-c@example.com",
-            function="Sales", role="CS",
-        )
-        db_session.add(owner)
-        db_session.flush()
+    def test_post_redirects_to_next(self, ui_client, db_session, tenant_id):
         _, engagement = create_account_and_engagement(db_session, tenant_id)
         db_session.commit()
 
@@ -399,12 +431,36 @@ class TestQuickNote:
             "/ui/quick-note",
             data={
                 "engagement_id": str(engagement.id), "raw_text": "電話メモ",
-                "owner_user_id": str(owner.id),
+                "next": "/ui/leads",
             },
             follow_redirects=False,
         )
         assert resp.status_code == 303
-        assert resp.headers["location"].startswith(f"/ui/quick-note?owner_user_id={owner.id}")
+        assert resp.headers["location"].startswith("/ui/leads")
+
+    def test_post_rejects_unsafe_next(self, ui_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        resp = ui_client.post(
+            "/ui/quick-note",
+            data={
+                "engagement_id": str(engagement.id), "raw_text": "電話メモ",
+                "next": "https://evil.example.com/",
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert resp.headers["location"].startswith("/ui/quick-note")
+
+    def test_sidebar_widget_appears_on_other_pages(self, ui_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        resp = ui_client.get("/ui/leads")
+        assert resp.status_code == 200
+        assert 'class="sidebar-quicknote"' in resp.text
+        assert engagement.name in resp.text
 
 
 class TestProposalInbox:
@@ -777,21 +833,9 @@ class TestSidebarNav:
         assert resp.status_code == 200
         assert "<details open>" not in resp.text
 
-    def test_quick_note_link_has_no_owner_param_by_default(self, ui_client):
+    def test_quick_note_link_has_no_query_params(self, ui_client):
+        # 担当者の選択はもう常設サイドバーウィジェット側のCookieで管理する
+        # ため(2026-08-14)、専用ページへのリンク自体は常に固定URL。
         resp = ui_client.get("/ui/")
         assert resp.status_code == 200
         assert 'href="/ui/quick-note"' in resp.text
-
-    def test_quick_note_link_propagates_owner_param(self, ui_client, db_session, tenant_id):
-        from crm_mvp.models import User
-
-        owner = User(
-            tenant_id=tenant_id, name="担当A", email="nav-a@example.com",
-            function="Sales", role="BDM",
-        )
-        db_session.add(owner)
-        db_session.commit()
-
-        resp = ui_client.get(f"/ui/?owner_user_id={owner.id}")
-        assert resp.status_code == 200
-        assert f'href="/ui/quick-note?owner_user_id={owner.id}"' in resp.text

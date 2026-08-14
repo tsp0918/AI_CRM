@@ -47,7 +47,7 @@ def accounts_list(
     accounts = list_accounts_tree_ordered(session, ui_session.tenant_id)
 
     context = base_context(
-        session, ui_session, active_nav="accounts", flash=flash, flash_type=flash_type,
+        session, ui_session, active_nav="accounts", request=request, flash=flash, flash_type=flash_type,
     )
     context.update({"accounts": accounts})
     return templates.TemplateResponse(request, "accounts.html", context)
@@ -123,7 +123,7 @@ def account_detail(
     )
 
     context = base_context(
-        session, ui_session, active_nav="accounts", flash=flash, flash_type=flash_type,
+        session, ui_session, active_nav="accounts", request=request, flash=flash, flash_type=flash_type,
     )
     context.update({
         "account": account, "parent": parent, "children": children,

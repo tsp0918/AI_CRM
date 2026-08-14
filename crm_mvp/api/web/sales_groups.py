@@ -29,7 +29,7 @@ def sales_groups_list(
     groups = list_sales_groups_tree_ordered(session, ui_session.tenant_id)
 
     context = base_context(
-        session, ui_session, active_nav="sales_groups", flash=flash, flash_type=flash_type,
+        session, ui_session, active_nav="sales_groups", request=request, flash=flash, flash_type=flash_type,
     )
     context.update({"groups": groups})
     return templates.TemplateResponse(request, "sales_groups.html", context)

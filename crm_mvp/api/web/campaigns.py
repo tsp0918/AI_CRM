@@ -64,7 +64,7 @@ def campaigns_list(
         })
 
     context = base_context(
-        session, ui_session, active_nav="campaigns", flash=flash, flash_type=flash_type,
+        session, ui_session, active_nav="campaigns", request=request, flash=flash, flash_type=flash_type,
     )
     context.update({
         "rows": rows, "channel_types": list(CampaignChannelType),

@@ -158,7 +158,7 @@ def renewals_list(
     bucketed = [(b, by_bucket[b]) for b in BUCKET_ORDER if by_bucket.get(b)]
 
     context = base_context(
-        session, ui_session, active_nav="renewals", flash=flash, flash_type=flash_type,
+        session, ui_session, active_nav="renewals", request=request, flash=flash, flash_type=flash_type,
     )
     context.update({
         "within_days": within_days, "dim": dim, "dim_choices": DIM_CHOICES,

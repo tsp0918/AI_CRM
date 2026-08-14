@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import uuid
 from urllib.parse import urlencode
 
+from fastapi import Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ...enums import ProposalStatus
-from ...models import ExtractionProposal
-from .session import UiSession
+from ...models import Engagement, ExtractionProposal
+from ...services.users import list_users
+from .session import QUICKNOTE_OWNER_COOKIE, UiSession
 
 STAGE_LABELS = {
     # "lead" ステージの表示名は Lead(見込み客)エンティティと語が衝突して
@@ -45,7 +48,7 @@ RELATIONSHIP_TYPE_LABELS = {
 
 
 def base_context(
-    session: Session, ui_session: UiSession, active_nav: str,
+    session: Session, ui_session: UiSession, active_nav: str, request: Request,
     flash: str | None = None, flash_type: str = "info",
 ) -> dict:
     pending_count = session.execute(
@@ -54,6 +57,31 @@ def base_context(
             ExtractionProposal.status == ProposalStatus.PENDING,
         )
     ).scalar_one()
+
+    # サイドバー常設のクイック入力ウィジェット用データ(2026-08-14)。
+    # 全ページで使うため、各ルートではなくここで一括して用意する。
+    quicknote_owner_id = request.cookies.get(QUICKNOTE_OWNER_COOKIE, "")
+    if quicknote_owner_id:
+        try:
+            owner_uuid = uuid.UUID(quicknote_owner_id)
+        except ValueError:
+            quicknote_owner_id, owner_uuid = "", None
+    else:
+        owner_uuid = None
+
+    if owner_uuid is not None:
+        quicknote_engagements = session.execute(
+            select(Engagement).where(
+                Engagement.tenant_id == ui_session.tenant_id,
+                Engagement.owner_user_id == owner_uuid,
+            ).order_by(Engagement.updated_at.desc())
+        ).scalars().all()
+    else:
+        quicknote_engagements = session.execute(
+            select(Engagement).where(Engagement.tenant_id == ui_session.tenant_id)
+            .order_by(Engagement.updated_at.desc()).limit(20)
+        ).scalars().all()
+
     return {
         "ui_session": ui_session,
         "active_nav": active_nav,
@@ -65,6 +93,9 @@ def base_context(
         "confidence_labels": CONFIDENCE_LABELS,
         "source_kind_labels": SOURCE_KIND_LABELS,
         "relationship_type_labels": RELATIONSHIP_TYPE_LABELS,
+        "quicknote_owner_id": quicknote_owner_id,
+        "quicknote_engagements": quicknote_engagements,
+        "quicknote_users": list_users(session, ui_session.tenant_id),
     }
 
 

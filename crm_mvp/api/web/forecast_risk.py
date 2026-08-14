@@ -44,7 +44,7 @@ def forecast_risk_page(
         Decimal("0"),
     )
 
-    context = base_context(session, ui_session, active_nav="forecast_risk")
+    context = base_context(session, ui_session, active_nav="forecast_risk", request=request)
     context.update({
         "assessments": assessments,
         "accounts": accounts,

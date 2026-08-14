@@ -18,10 +18,11 @@ from ...enums import SourceKind
 from ...models import Engagement, IngestionSource
 from ...ports.extractor import ExtractorPort
 from ...services.ingestion_runner import process_source
-from ...services.users import list_users
 from ..deps import get_extractor
 from .common import base_context, redirect_with_flash
-from .session import UiSession, get_ui_db_session, require_ui_session
+from .session import (
+    QUICKNOTE_OWNER_COOKIE, COOKIE_MAX_AGE, UiSession, get_ui_db_session, require_ui_session,
+)
 from .templates import templates
 
 router = APIRouter(tags=["web"])
@@ -55,7 +56,7 @@ def source_new_form(
         .order_by(Engagement.name)
     ).scalars().all()
 
-    context = base_context(session, ui_session, active_nav="dashboard")
+    context = base_context(session, ui_session, active_nav="dashboard", request=request)
     context.update({
         "engagements": engagements,
         "preselected_engagement_id": engagement_id,
@@ -116,65 +117,62 @@ def source_new_submit(
     return redirect_with_flash(f"/ui/engagements/{engagement_id}", message)
 
 
-# --- クイック入力(モバイル/商談直後向けの軽量版) -----------------------------
+# --- クイック入力(サイドバー常設 + 単体ページ) -------------------------------
 #
 # 通常の情報投入フォームは種別選択・出席者欄など機能が多く、移動中や
 # 商談直後にその場で使うには重い。ここでは「案件を選ぶ」「本文を書く」
 # 「送る」の3手だけに絞った経路を別途用意する(自由メモ固定・出席者欄なし)。
 # 裏側のパイプラインは source_new_submit と完全に同じものを再利用する。
+#
+# 2026-08-14: 担当者の選択を全ページ横断で覚えておく必要があるため
+# (サイドバーに常時表示する形にしたため、クエリパラメータでは運べない)、
+# QUICKNOTE_OWNER_COOKIE に保存する方式に変更。案件一覧そのものは
+# base_context() が quicknote_engagements として全ページ分一括で用意する。
+
+def _safe_next(next_url: str, fallback: str = "/ui/") -> str:
+    """オープンリダイレクト対策: 自サイトの絶対パス以外は受け付けない。"""
+    if next_url.startswith("/ui/") and not next_url.startswith("//"):
+        return next_url
+    return fallback
+
 
 @router.get("/ui/quick-note", response_class=HTMLResponse)
 def quick_note_form(
     request: Request,
     engagement_id: str = "",
-    owner_user_id: str = "",
     flash: str | None = None,
     flash_type: str = "info",
     ui_session: UiSession = Depends(require_ui_session),
     session: Session = Depends(get_ui_db_session),
 ) -> HTMLResponse:
-    # 2026-08-14: owner_user_id が付いていれば(ダッシュボードの担当者
-    # 絞り込みからサイドバー経由で遷移してきた場合)、その担当者の案件を
-    # 「自分の担当」として先に出す。付いていなければ今まで通りフラットな
-    # 直近更新20件のみ(後方互換)。
-    own_engagements: list[Engagement] = []
-    if owner_user_id:
-        own_engagements = session.execute(
-            select(Engagement).where(
-                Engagement.tenant_id == ui_session.tenant_id,
-                Engagement.owner_user_id == uuid.UUID(owner_user_id),
-            ).order_by(Engagement.updated_at.desc())
-        ).scalars().all()
-    own_ids = {e.id for e in own_engagements}
-
-    other_engagements = [
-        e for e in session.execute(
-            select(Engagement).where(Engagement.tenant_id == ui_session.tenant_id)
-            .order_by(Engagement.updated_at.desc()).limit(20)
-        ).scalars().all()
-        if e.id not in own_ids
-    ]
-
     context = base_context(
-        session, ui_session, active_nav="quick_note", flash=flash, flash_type=flash_type,
+        session, ui_session, active_nav="quick_note", request=request, flash=flash, flash_type=flash_type,
     )
-    context.update({
-        "own_engagements": own_engagements, "other_engagements": other_engagements,
-        "preselected_engagement_id": engagement_id,
-        "users": list_users(session, ui_session.tenant_id), "owner_user_id": owner_user_id,
-    })
+    context.update({"preselected_engagement_id": engagement_id})
     return templates.TemplateResponse(request, "quick_note.html", context)
 
 
-def _quick_note_url(owner_user_id: str) -> str:
-    return f"/ui/quick-note?owner_user_id={owner_user_id}" if owner_user_id else "/ui/quick-note"
+@router.post("/ui/quick-note/owner")
+def set_quicknote_owner_ui(
+    owner_user_id: str = Form(""),
+    next: str = Form("/ui/"),
+    ui_session: UiSession = Depends(require_ui_session),
+) -> RedirectResponse:
+    response = RedirectResponse(url=_safe_next(next), status_code=303)
+    if owner_user_id:
+        response.set_cookie(
+            QUICKNOTE_OWNER_COOKIE, owner_user_id, max_age=COOKIE_MAX_AGE, httponly=True,
+        )
+    else:
+        response.delete_cookie(QUICKNOTE_OWNER_COOKIE)
+    return response
 
 
 @router.post("/ui/quick-note")
 def quick_note_submit(
     engagement_id: str = Form(...),
     raw_text: str = Form(""),
-    owner_user_id: str = Form(""),
+    next: str = Form("/ui/quick-note"),
     ui_session: UiSession = Depends(require_ui_session),
     session: Session = Depends(get_ui_db_session),
     extractor: ExtractorPort = Depends(get_extractor),
@@ -184,7 +182,7 @@ def quick_note_submit(
     if engagement is None or engagement.tenant_id != ui_session.tenant_id:
         raise HTTPException(status_code=404, detail="engagement not found")
 
-    redirect_url = _quick_note_url(owner_user_id)
+    redirect_url = _safe_next(next, fallback="/ui/quick-note")
 
     if not raw_text.strip():
         return redirect_with_flash(

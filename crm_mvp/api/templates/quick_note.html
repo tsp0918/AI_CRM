@@ -4,49 +4,44 @@
 
 {% block content %}
 <h1>⚡ クイック入力</h1>
-<p class="subtitle">案件を選んで、思い出せるうちにそのまま書くだけ。種別選択や出席者欄は省略しています。</p>
+<p class="subtitle">
+  案件を選んで、思い出せるうちにそのまま書くだけ。種別選択や出席者欄は省略しています。
+  同じ機能はサイドバー下部からもどのページからでも使えます — こちらは広い画面でじっくり書きたいときのフォーカス版です。
+</p>
 
-{% if not own_engagements and not other_engagements %}
-<div class="card">
-  <div class="empty-state">
-    先に <a href="/ui/engagements/new">+ 新規案件</a> を作成してください。
-  </div>
-</div>
-{% else %}
-<form method="get" action="/ui/quick-note" class="filter-bar" style="max-width:520px; margin-bottom:12px;">
+<form method="post" action="/ui/quick-note/owner" class="filter-bar" style="max-width:520px; margin-bottom:12px;">
+  <input type="hidden" name="next" value="/ui/quick-note">
   <div>
     <label for="owner_user_id">担当者</label>
     <select id="owner_user_id" name="owner_user_id" onchange="this.form.submit()">
       <option value="">すべて</option>
-      {% for u in users %}
-      <option value="{{ u.id }}" {% if owner_user_id == u.id|string %}selected{% endif %}>{{ u.name }}</option>
+      {% for u in quicknote_users %}
+      <option value="{{ u.id }}" {% if quicknote_owner_id == u.id|string %}selected{% endif %}>{{ u.name }}</option>
       {% endfor %}
     </select>
   </div>
 </form>
 
+{% if not quicknote_engagements %}
+<div class="card">
+  <div class="empty-state">
+    {% if quicknote_owner_id %}
+    この担当者の案件がありません。<a href="/ui/engagements/new">+ 新規案件</a> を作成するか、担当者の絞り込みを外してください。
+    {% else %}
+    先に <a href="/ui/engagements/new">+ 新規案件</a> を作成してください。
+    {% endif %}
+  </div>
+</div>
+{% else %}
 <div class="card" style="max-width: 520px;">
   <form method="post" action="/ui/quick-note">
-    <input type="hidden" name="owner_user_id" value="{{ owner_user_id }}">
+    <input type="hidden" name="next" value="/ui/quick-note">
     <label for="engagement_id">案件</label>
     <select id="engagement_id" name="engagement_id" required>
       <option value="">選択してください</option>
-      {% if own_engagements %}
-      <optgroup label="自分の担当">
-        {% for e in own_engagements %}
-        <option value="{{ e.id }}" {% if preselected_engagement_id == e.id|string %}selected{% endif %}>{{ e.name }}</option>
-        {% endfor %}
-      </optgroup>
-      <optgroup label="その他(直近更新)">
-        {% for e in other_engagements %}
-        <option value="{{ e.id }}" {% if preselected_engagement_id == e.id|string %}selected{% endif %}>{{ e.name }}</option>
-        {% endfor %}
-      </optgroup>
-      {% else %}
-      {% for e in other_engagements %}
+      {% for e in quicknote_engagements %}
       <option value="{{ e.id }}" {% if preselected_engagement_id == e.id|string %}selected{% endif %}>{{ e.name }}</option>
       {% endfor %}
-      {% endif %}
     </select>
 
     <label for="raw_text">今の内容をそのまま</label>

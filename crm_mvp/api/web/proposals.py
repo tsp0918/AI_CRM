@@ -57,7 +57,7 @@ def proposals_inbox(
         }
 
     context = base_context(
-        session, ui_session, active_nav="proposals", flash=flash, flash_type=flash_type,
+        session, ui_session, active_nav="proposals", request=request, flash=flash, flash_type=flash_type,
     )
     context.update({
         "proposals": proposals, "engagements": engagements,

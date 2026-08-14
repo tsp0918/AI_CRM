@@ -72,7 +72,7 @@ def revenue_report_page(
     )
     by_product_group = product_group_revenue(session, ui_session.tenant_id)
 
-    context = base_context(session, ui_session, active_nav="revenue_report")
+    context = base_context(session, ui_session, active_nav="revenue_report", request=request)
     context.update({
         "total_revenue": total_revenue, "deal_count": len(rows),
         "by_account": by_account, "by_sales_group": by_sales_group,
@@ -117,7 +117,7 @@ def revenue_drilldown_page(
             RELATIONSHIP_TYPE_REPORT_LABELS.get(relationship_type, relationship_type),
         ))
 
-    context = base_context(session, ui_session, active_nav="revenue_report")
+    context = base_context(session, ui_session, active_nav="revenue_report", request=request)
     context.update({
         "filter_labels": filter_labels, "total_revenue": total_revenue,
         "by_product": by_product, "deals": deals,
@@ -159,7 +159,7 @@ def report_builder_page(
     )
     result = pivot(filtered, row_dim, col_dim)
 
-    context = base_context(session, ui_session, active_nav="report_builder")
+    context = base_context(session, ui_session, active_nav="report_builder", request=request)
     context.update({
         "dimension_choices": DIMENSION_CHOICES,
         "selected_rows": row_dim.key, "selected_cols": col_dim.key if col_dim else "",

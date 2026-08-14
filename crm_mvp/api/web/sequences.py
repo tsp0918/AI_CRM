@@ -85,7 +85,7 @@ def sequences_list(
         })
 
     context = base_context(
-        session, ui_session, active_nav="sequences", flash=flash, flash_type=flash_type,
+        session, ui_session, active_nav="sequences", request=request, flash=flash, flash_type=flash_type,
     )
     context.update({
         "rows": rows, "step_channels": list(SequenceStepChannel),
@@ -162,7 +162,7 @@ def sequence_detail(
 
     funnel = sequence_funnel(session, ui_session.tenant_id, sequence_id)
 
-    context = base_context(session, ui_session, active_nav="sequences")
+    context = base_context(session, ui_session, active_nav="sequences", request=request)
     context.update({
         "sequence": sequence, "funnel": funnel,
         "step_channel_labels": STEP_CHANNEL_LABELS,

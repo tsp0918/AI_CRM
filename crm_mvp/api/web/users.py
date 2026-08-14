@@ -38,7 +38,7 @@ def users_list(
         ).scalars()
     }
 
-    context = base_context(session, ui_session, active_nav="users")
+    context = base_context(session, ui_session, active_nav="users", request=request)
     context.update({
         "users": users, "sales_groups": sales_groups, "authority_labels": AUTHORITY_LABELS,
     })

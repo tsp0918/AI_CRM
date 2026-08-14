@@ -11,6 +11,12 @@ from crm_mvp.enums import ContractStatus, Stage
 from crm_mvp.models import Contract, Engagement
 
 
+def _main_content(resp_text: str) -> str:
+    """常設サイドバーのクイック入力ウィジェットにも案件名が出るため
+    (2026-08-14)、ページ本文だけを比較したいテストはこれで切り出す。"""
+    return resp_text.split('<main class="page">', 1)[-1]
+
+
 def make_contract(db_session, tenant_id, engagement, **overrides) -> Contract:
     defaults = dict(
         tenant_id=tenant_id, engagement_id=engagement.id, contract_number="C-TEST-0001",
@@ -114,7 +120,7 @@ class TestRenewalsPage:
         assert child.relationship_type == "renewal"
 
         resp = ui_client.get("/ui/renewals")
-        assert eng.name not in resp.text
+        assert eng.name not in _main_content(resp.text)
 
     def test_buckets_by_days_remaining(self, ui_client, db_session, tenant_id):
         _, overdue_eng = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
@@ -150,5 +156,6 @@ class TestRenewalsPage:
 
         resp = ui_client.get(f"/ui/renewals?dim=account&account_id={account_a.id}")
         assert resp.status_code == 200
-        assert "A社の更新案件" in resp.text
-        assert "B社の更新案件" not in resp.text
+        main = _main_content(resp.text)
+        assert "A社の更新案件" in main
+        assert "B社の更新案件" not in main

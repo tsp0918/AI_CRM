@@ -144,7 +144,7 @@ def leads_list(
     ).scalars().all()
 
     context = base_context(
-        session, ui_session, active_nav="leads", flash=flash, flash_type=flash_type,
+        session, ui_session, active_nav="leads", request=request, flash=flash, flash_type=flash_type,
     )
     context.update({
         "rows": rows, "total_count": len(all_rows), "lead_status_labels": LEAD_STATUS_LABELS,
@@ -202,7 +202,7 @@ def lead_new_form(
         select(Campaign).where(Campaign.tenant_id == ui_session.tenant_id)
         .order_by(Campaign.name)
     ).scalars().all()
-    context = base_context(session, ui_session, active_nav="leads")
+    context = base_context(session, ui_session, active_nav="leads", request=request)
     context.update({"source_channels": list(LeadSourceChannel), "campaigns": campaigns})
     return templates.TemplateResponse(request, "lead_new.html", context)
 
@@ -295,7 +295,7 @@ def lead_detail(
     }
 
     context = base_context(
-        session, ui_session, active_nav="leads", flash=flash, flash_type=flash_type,
+        session, ui_session, active_nav="leads", request=request, flash=flash, flash_type=flash_type,
     )
     context.update({
         "lead": lead, "score": ctx["score"], "touches": ctx["touches"],

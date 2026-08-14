@@ -57,7 +57,7 @@ def engagement_new_form(
     ui_session: UiSession = Depends(require_ui_session),
     session: Session = Depends(get_ui_db_session),
 ) -> HTMLResponse:
-    context = base_context(session, ui_session, active_nav="new")
+    context = base_context(session, ui_session, active_nav="new", request=request)
     context.update({"sales_groups": list_sales_groups_tree_ordered(session, ui_session.tenant_id)})
     return templates.TemplateResponse(request, "engagement_new.html", context)
 
@@ -218,7 +218,7 @@ def engagement_detail(
     )
 
     context = base_context(
-        session, ui_session, active_nav="dashboard", flash=flash, flash_type=flash_type,
+        session, ui_session, active_nav="dashboard", request=request, flash=flash, flash_type=flash_type,
     )
     context.update({
         "engagement": engagement, "account": account,
@@ -263,7 +263,7 @@ def activity_log_page(
     account = session.get(Account, engagement.account_id)
     activity = load_activity_log(session, ui_session.tenant_id, engagement)
 
-    context = base_context(session, ui_session, active_nav="dashboard")
+    context = base_context(session, ui_session, active_nav="dashboard", request=request)
     context.update({
         "engagement": engagement, "account": account, "activity": activity,
     })

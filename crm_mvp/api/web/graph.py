@@ -75,7 +75,7 @@ def graph_page(
     )
     reasons = score_reasons(score, CRITERION_LABELS)
 
-    context = base_context(session, ui_session, active_nav="dashboard")
+    context = base_context(session, ui_session, active_nav="dashboard", request=request)
     context.update({
         "include_sensitive": include_sensitive,
         "engagement": engagement,

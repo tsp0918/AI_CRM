@@ -145,7 +145,7 @@ def quotes_and_contracts_list(
     filtered_quote_facts = filter_documents(quote_facts, **filter_kwargs) if filter_kwargs else quote_facts
     filtered_contract_facts = filter_documents(contract_facts, **filter_kwargs) if filter_kwargs else contract_facts
 
-    context = base_context(session, ui_session, active_nav="quotes")
+    context = base_context(session, ui_session, active_nav="quotes", request=request)
     context.update({
         "dim": dim, "dim_choices": DIM_CHOICES,
         "owner_user_id": owner_user_id, "product_group_id": product_group_id,

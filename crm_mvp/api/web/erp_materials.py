@@ -34,7 +34,7 @@ def erp_materials_list(
     materials = list_erp_materials(session, ui_session.tenant_id)
 
     context = base_context(
-        session, ui_session, active_nav="erp_materials", flash=flash, flash_type=flash_type,
+        session, ui_session, active_nav="erp_materials", request=request, flash=flash, flash_type=flash_type,
     )
     context.update({
         "materials": materials,

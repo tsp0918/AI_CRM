@@ -21,7 +21,7 @@
 
     /* サイドバー */
     .sidebar {
-      width: 220px;
+      width: 280px;
       flex-shrink: 0;
       background: #111827;
       color: #e5e7eb;
@@ -55,6 +55,35 @@
       font-size: 11px; color: #9ca3af; padding: 10px;
       border-top: 1px solid #1f2937; margin-top: 8px;
       display: flex; flex-direction: column; gap: 6px;
+    }
+
+    /* サイドバー常設のクイック入力ウィジェット(2026-08-14)。
+       どのページからでも、その場を離れずにログを残せるようにする。 */
+    .sidebar-quicknote {
+      border-top: 1px solid #1f2937;
+      margin-top: 10px;
+      padding: 10px 10px 4px;
+    }
+    .sidebar-quicknote select,
+    .sidebar-quicknote textarea {
+      font-size: 12px;
+      padding: 6px 8px;
+      margin-bottom: 8px;
+    }
+    .sidebar-quicknote textarea {
+      min-height: 64px;
+      resize: vertical;
+    }
+    .sidebar-quicknote .btn {
+      width: 100%;
+      padding: 8px;
+      font-size: 12px;
+    }
+    .sidebar-quicknote .empty-state {
+      color: #6b7280;
+      font-size: 11px;
+      padding: 4px 0 10px;
+      text-align: left;
     }
     .badge-count {
       display: inline-block;
@@ -313,9 +342,8 @@
   <nav class="sidebar">
     <span class="sidebar-brand">Agentic CRM</span>
 
-    {% set current_owner_qs = request.query_params.get('owner_user_id') %}
     <a href="/ui/" class="{% if active_nav == 'dashboard' %}active{% endif %}">ダッシュボード</a>
-    <a href="/ui/quick-note{% if current_owner_qs %}?owner_user_id={{ current_owner_qs }}{% endif %}" class="{% if active_nav == 'quick_note' %}active{% endif %}">⚡ クイック入力</a>
+    <a href="/ui/quick-note" class="{% if active_nav == 'quick_note' %}active{% endif %}">⚡ クイック入力(フォーカス版)</a>
     <a href="/ui/engagements/new" class="{% if active_nav == 'new' %}active{% endif %}">+ 新規案件</a>
     <a href="/ui/proposals" class="{% if active_nav == 'proposals' %}active{% endif %}">
       提案承認{% if pending_count %}<span class="badge-count">{{ pending_count }}</span>{% endif %}
@@ -344,6 +372,36 @@
       <a href="/ui/sales-groups" class="{% if active_nav == 'sales_groups' %}active{% endif %}">セールスグループ</a>
       <a href="/ui/users" class="{% if active_nav == 'users' %}active{% endif %}">ユーザー</a>
     </details>
+
+    {% set current_path = request.url.path %}
+    {% set next_url = current_path ~ ("?" ~ request.url.query if request.url.query else "") %}
+    <div class="sidebar-quicknote">
+      <div class="sidebar-label" style="padding-left:0;">⚡ クイック入力</div>
+      <form method="post" action="/ui/quick-note/owner">
+        <input type="hidden" name="next" value="{{ next_url }}">
+        <select name="owner_user_id" onchange="this.form.submit()">
+          <option value="">担当者ですべて</option>
+          {% for u in quicknote_users %}
+          <option value="{{ u.id }}" {% if quicknote_owner_id == u.id|string %}selected{% endif %}>{{ u.name }}</option>
+          {% endfor %}
+        </select>
+      </form>
+      {% if quicknote_engagements %}
+      <form method="post" action="/ui/quick-note">
+        <input type="hidden" name="next" value="{{ next_url }}">
+        <select name="engagement_id" required>
+          <option value="">案件を選択</option>
+          {% for e in quicknote_engagements %}
+          <option value="{{ e.id }}">{{ e.name }}</option>
+          {% endfor %}
+        </select>
+        <textarea name="raw_text" required placeholder="今の内容をそのまま"></textarea>
+        <button type="submit" class="btn quick-btn">送る</button>
+      </form>
+      {% else %}
+      <p class="empty-state">対象の案件がありません</p>
+      {% endif %}
+    </div>
 
     <div class="sidebar-spacer"></div>
     <div class="sidebar-actor">

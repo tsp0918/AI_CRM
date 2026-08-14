@@ -24,6 +24,11 @@ ACTOR_COOKIE = "crm_actor_id"
 ACTOR_NAME_COOKIE = "crm_actor_name"
 COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30日
 
+# クイック入力サイドバーウィジェットが「最後に選んだ担当者」を画面横断で
+# 覚えておくためだけのUI設定Cookie(2026-08-14)。認証・権限とは無関係 —
+# 上の擬似セッションCookie群とは別の目的で、意図的に分けて定義する。
+QUICKNOTE_OWNER_COOKIE = "crm_quicknote_owner_id"
+
 
 @dataclass(slots=True)
 class UiSession:

@@ -34,7 +34,7 @@ def erp_business_partners_list(
     partners = list_erp_business_partners(session, ui_session.tenant_id)
 
     context = base_context(
-        session, ui_session, active_nav="erp_business_partners", flash=flash, flash_type=flash_type,
+        session, ui_session, active_nav="erp_business_partners", request=request, flash=flash, flash_type=flash_type,
     )
     context.update({"partners": partners})
     return templates.TemplateResponse(request, "erp_business_partners.html", context)

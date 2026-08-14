@@ -47,7 +47,7 @@ def products_list(
     margins = {p.id: compute_gross_margin_rate(p) for p in products}
 
     context = base_context(
-        session, ui_session, active_nav="products", flash=flash, flash_type=flash_type,
+        session, ui_session, active_nav="products", request=request, flash=flash, flash_type=flash_type,
     )
     context.update({
         "products": products, "materials": materials, "product_groups": product_groups,
