@@ -1,0 +1,81 @@
+{% extends "_base.html" %}
+
+{% block title %}スナップショット履歴 | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<h1>スナップショット履歴</h1>
+<p class="subtitle">
+  売上・キャンペーン効果・シーケンス効果・パイプラインを、任意の時点で保存しておける経営レポートです。
+  売上レポート等(常に「今」を見る画面)とは別に、時系列で振り返りたいときに使います。
+</p>
+
+<div class="card">
+  <h2>現在の状態をスナップショットとして保存する</h2>
+  <form method="post" action="/ui/reports/history/capture" class="field-row">
+    <div>
+      <label for="label">ラベル(任意)</label>
+      <input type="text" id="label" name="label" placeholder="例: FY2026 Q2">
+    </div>
+    <div style="flex:none; padding-bottom:14px;">
+      <button type="submit" class="btn">保存する</button>
+    </div>
+  </form>
+  <p class="subtitle" style="margin-top:8px;">同じ日にもう一度保存すると上書きされます。</p>
+</div>
+
+{% if snapshots %}
+<div class="card" style="padding:0;">
+  <table>
+    <thead>
+      <tr>
+        <th>日付</th><th>ラベル</th><th>累計実売上</th><th>受注商談数</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in snapshots %}
+      <tr>
+        <td><a href="/ui/reports/history/{{ s.id }}">{{ s.snapshot_date }}</a></td>
+        <td class="muted">{{ s.label or "—" }}</td>
+        <td class="mono">
+          {% for currency, amount in s.payload.revenue.totals_by_currency %}
+          {{ "{:,.0f}".format(amount|float) }} {{ currency }}{% if not loop.last %} / {% endif %}
+          {% else %}—{% endfor %}
+        </td>
+        <td class="mono">{{ s.payload.revenue.deal_count }}</td>
+        <td><a href="/ui/reports/history/{{ s.id }}">詳細 &rarr;</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>2時点を比較する</h2>
+  <form method="get" action="/ui/reports/history/compare" class="field-row">
+    <div>
+      <label for="from_id">起点(古い方)</label>
+      <select id="from_id" name="from_id">
+        {% for s in snapshots %}
+        <option value="{{ s.id }}">{{ s.snapshot_date }}{% if s.label %}({{ s.label }}){% endif %}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="to_id">終点(新しい方)</label>
+      <select id="to_id" name="to_id">
+        {% for s in snapshots %}
+        <option value="{{ s.id }}" {% if loop.first %}selected{% endif %}>{{ s.snapshot_date }}{% if s.label %}({{ s.label }}){% endif %}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="flex:none; padding-bottom:14px;">
+      <button type="submit" class="btn">比較する</button>
+    </div>
+  </form>
+</div>
+{% else %}
+<div class="card">
+  <div class="empty-state">まだスナップショットがありません。上のフォームから保存してください。</div>
+</div>
+{% endif %}
+{% endblock %}

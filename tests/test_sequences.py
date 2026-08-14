@@ -347,3 +347,52 @@ class TestSequenceFunnel:
         funnel = sq.sequence_funnel(db_session, tenant_id, sequence.id)
         assert funnel["total_enrolled"] == 0
         assert all(s["reached_pct"] == 0 for s in funnel["steps"])
+
+    def test_as_of_excludes_enrollments_and_drafts_after_that_date(self, db_session, tenant_id):
+        sequence = sq.create_sequence(
+            db_session, tenant_id, name="S", description=None,
+            steps=DEMO_STEPS, actor="human:m",
+        )
+        lead_a = make_lead(db_session, tenant_id, full_name="A")
+        lead_b = make_lead(db_session, tenant_id, full_name="B")
+
+        enrollment_a = sq.enroll_lead(db_session, tenant_id, lead_a, sequence, actor="human:m", now=NOW)
+        enrollment_a.created_at = NOW  # Timestamped既定はサーバー時刻のため明示的に上書き
+        db_session.flush()
+        sq.generate_due_drafts(db_session, tenant_id, now=NOW)
+
+        later = NOW + timedelta(days=10)
+        enrollment_b = sq.enroll_lead(db_session, tenant_id, lead_b, sequence, actor="human:m", now=later)
+        enrollment_b.created_at = later
+        db_session.flush()
+        sq.generate_due_drafts(db_session, tenant_id, now=later)
+        db_session.commit()
+
+        as_of_funnel = sq.sequence_funnel(db_session, tenant_id, sequence.id, as_of=NOW + timedelta(days=1))
+        assert as_of_funnel["total_enrolled"] == 1
+        assert as_of_funnel["steps"][0]["reached_count"] == 1
+
+        live_funnel = sq.sequence_funnel(db_session, tenant_id, sequence.id)
+        assert live_funnel["total_enrolled"] == 2
+
+
+class TestListSequenceSummaries:
+    def test_summarizes_step_count_and_reach(self, db_session, tenant_id):
+        sequence = sq.create_sequence(
+            db_session, tenant_id, name="S", description=None,
+            steps=DEMO_STEPS, actor="human:m",
+        )
+        lead = make_lead(db_session, tenant_id)
+        sq.enroll_lead(db_session, tenant_id, lead, sequence, actor="human:m", now=NOW)
+        db_session.flush()
+        sq.generate_due_drafts(db_session, tenant_id, now=NOW)
+        db_session.commit()
+
+        rows = sq.list_sequence_summaries(db_session, tenant_id)
+        assert len(rows) == 1
+        assert rows[0]["step_count"] == 3
+        assert rows[0]["total_enrolled"] == 1
+        assert rows[0]["final_reach_pct"] == 0  # 最終ステップにはまだ届いていない
+
+    def test_no_sequences_returns_empty_list(self, db_session, tenant_id):
+        assert sq.list_sequence_summaries(db_session, tenant_id) == []

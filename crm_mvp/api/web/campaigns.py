@@ -10,11 +10,11 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ...enums import CampaignChannelType
-from ...models import Campaign, Lead
+from ...models import Campaign
+from ...services.campaigns import list_campaign_effectiveness
 from .common import base_context, redirect_with_flash
 from .session import UiSession, get_ui_db_session, require_ui_session
 from .templates import templates
@@ -35,33 +35,7 @@ def campaigns_list(
     ui_session: UiSession = Depends(require_ui_session),
     session: Session = Depends(get_ui_db_session),
 ) -> HTMLResponse:
-    campaigns = session.execute(
-        select(Campaign).where(Campaign.tenant_id == ui_session.tenant_id)
-        .order_by(Campaign.created_at.desc())
-    ).scalars().all()
-
-    # campaign毎に2クエリ(N+1)ではなく、GROUP BYでテナント全体を2クエリで
-    # まとめて集計する。
-    lead_counts = dict(session.execute(
-        select(Lead.source_campaign_id, func.count()).where(
-            Lead.tenant_id == ui_session.tenant_id, Lead.source_campaign_id.is_not(None),
-        ).group_by(Lead.source_campaign_id)
-    ).all())
-    converted_counts = dict(session.execute(
-        select(Lead.source_campaign_id, func.count()).where(
-            Lead.tenant_id == ui_session.tenant_id, Lead.source_campaign_id.is_not(None),
-            Lead.status == "converted",
-        ).group_by(Lead.source_campaign_id)
-    ).all())
-
-    rows = []
-    for c in campaigns:
-        lead_count = lead_counts.get(c.id, 0)
-        converted_count = converted_counts.get(c.id, 0)
-        rows.append({
-            "campaign": c, "lead_count": lead_count, "converted_count": converted_count,
-            "conversion_rate": round(converted_count / lead_count * 100) if lead_count else 0,
-        })
+    rows = list_campaign_effectiveness(session, ui_session.tenant_id)
 
     context = base_context(
         session, ui_session, active_nav="campaigns", request=request, flash=flash, flash_type=flash_type,

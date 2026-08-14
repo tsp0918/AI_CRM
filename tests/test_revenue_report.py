@@ -94,6 +94,24 @@ class TestClosedWonRevenueRows:
         rows = rr.closed_won_revenue_rows(db_session, tenant_id)
         assert rows[0]["currency"] == "USD"
 
+    def test_as_of_excludes_deals_closed_after_that_date(self, db_session, tenant_id):
+        from datetime import date, datetime, timedelta, timezone
+
+        from crm_mvp.models import StageTransition
+
+        _, eng = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
+        db_session.add(StageTransition(
+            tenant_id=tenant_id, engagement_id=eng.id, from_stage=Stage.NEGOTIATION,
+            to_stage=Stage.CLOSED_WON, occurred_at=datetime.now(timezone.utc),
+            written_by="human:t",
+        ))
+        db_session.commit()
+
+        past = date.today() - timedelta(days=365)
+        assert rr.closed_won_revenue_rows(db_session, tenant_id, as_of=past) == []
+        assert len(rr.closed_won_revenue_rows(db_session, tenant_id, as_of=date.today())) == 1
+        assert len(rr.closed_won_revenue_rows(db_session, tenant_id)) == 1
+
 
 class TestTotalsByCurrency:
     def test_single_currency_sums_to_one_entry(self):

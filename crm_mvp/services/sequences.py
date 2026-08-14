@@ -22,7 +22,7 @@ import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..enums import SequenceDraftStatus, SequenceEnrollmentStatus
@@ -273,28 +273,39 @@ def dismiss_draft(
     return draft
 
 
-def sequence_funnel(session: Session, tenant_id: uuid.UUID, sequence_id: uuid.UUID) -> dict:
+def sequence_funnel(
+    session: Session, tenant_id: uuid.UUID, sequence_id: uuid.UUID,
+    as_of: datetime | None = None,
+) -> dict:
     """シーケンス1件分の効果を可視化する。各ステップについて「登録total件中
     何件がそこに到達したか」を%で出す(分岐でスキップされた経路は
     到達に数えない)。あわせてステップごとの到達Lead一覧も返す。
+
+    as_of を指定すると「その時点までに登録・到達していたもの」だけに
+    絞る(経営レポートのスナップショットで過去時点を再構成するために使う)。
+    現在の画面(as_of=None)の挙動は変えない。
     """
     steps = _steps_for(session, tenant_id, sequence_id)
-    enrollments = session.execute(
-        select(SequenceEnrollment).where(
-            SequenceEnrollment.tenant_id == tenant_id,
-            SequenceEnrollment.sequence_id == sequence_id,
-        )
-    ).scalars().all()
+    enrollment_query = select(SequenceEnrollment).where(
+        SequenceEnrollment.tenant_id == tenant_id,
+        SequenceEnrollment.sequence_id == sequence_id,
+    )
+    if as_of is not None:
+        enrollment_query = enrollment_query.where(SequenceEnrollment.created_at <= as_of)
+    enrollments = session.execute(enrollment_query).scalars().all()
     total = len(enrollments)
     enrollment_by_id = {e.id: e for e in enrollments}
 
     drafts: list[SequenceDraft] = []
     if enrollments:
+        draft_query = select(SequenceDraft).where(
+            SequenceDraft.tenant_id == tenant_id,
+            SequenceDraft.enrollment_id.in_(list(enrollment_by_id)),
+        )
+        if as_of is not None:
+            draft_query = draft_query.where(SequenceDraft.generated_at <= as_of)
         drafts = session.execute(
-            select(SequenceDraft).where(
-                SequenceDraft.tenant_id == tenant_id,
-                SequenceDraft.enrollment_id.in_(list(enrollment_by_id)),
-            ).order_by(SequenceDraft.generated_at)
+            draft_query.order_by(SequenceDraft.generated_at)
         ).scalars().all()
 
     lead_ids = {e.lead_id for e in enrollments}
@@ -330,3 +341,39 @@ def sequence_funnel(session: Session, tenant_id: uuid.UUID, sequence_id: uuid.UU
         status_counts[e.status] = status_counts.get(e.status, 0) + 1
 
     return {"total_enrolled": total, "steps": steps_out, "status_counts": status_counts}
+
+
+def list_sequence_summaries(
+    session: Session, tenant_id: uuid.UUID, as_of: datetime | None = None,
+) -> list[dict]:
+    """シーケンス一覧画面向けに、各シーケンスのステップ数・稼働中登録数・
+    総登録数・最終ステップ到達率をまとめる(crm_mvp/api/web/sequences.py
+    の一覧構築ロジックを、経営レポート・スナップショット機能からも
+    再利用できるようサービス層に抽出したもの)。"""
+    sequences = session.execute(
+        select(Sequence).where(Sequence.tenant_id == tenant_id)
+        .order_by(Sequence.created_at.desc())
+    ).scalars().all()
+
+    rows = []
+    for seq in sequences:
+        step_count = session.execute(
+            select(func.count()).select_from(SequenceStep).where(
+                SequenceStep.tenant_id == tenant_id,
+                SequenceStep.sequence_id == seq.id,
+            )
+        ).scalar_one()
+        active_count = session.execute(
+            select(func.count()).select_from(SequenceEnrollment).where(
+                SequenceEnrollment.tenant_id == tenant_id,
+                SequenceEnrollment.sequence_id == seq.id,
+                SequenceEnrollment.status == SequenceEnrollmentStatus.ACTIVE,
+            )
+        ).scalar_one()
+        funnel = sequence_funnel(session, tenant_id, seq.id, as_of=as_of)
+        final_reach_pct = funnel["steps"][-1]["reached_pct"] if funnel["steps"] else 0
+        rows.append({
+            "sequence": seq, "step_count": step_count, "active_count": active_count,
+            "total_enrolled": funnel["total_enrolled"], "final_reach_pct": final_reach_pct,
+        })
+    return rows

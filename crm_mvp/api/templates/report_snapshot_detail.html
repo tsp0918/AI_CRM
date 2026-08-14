@@ -1,0 +1,129 @@
+{% extends "_base.html" %}
+
+{% block title %}スナップショット {{ snapshot.snapshot_date }} | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<p><a href="/ui/reports/history">&larr; スナップショット履歴に戻る</a></p>
+<h1>{{ snapshot.snapshot_date }}{% if snapshot.label %}({{ snapshot.label }}){% endif %}</h1>
+
+<div class="card">
+  <h2>累計実売上</h2>
+  <div style="display:flex; gap:24px; flex-wrap:wrap;">
+    {% for currency, amount in snapshot.payload.revenue.totals_by_currency %}
+    <div style="font-size:28px; font-weight:800; font-family:ui-monospace,monospace;">
+      {{ "{:,.0f}".format(amount|float) }} {{ currency }}
+    </div>
+    {% else %}
+    <div style="font-size:28px; font-weight:800; font-family:ui-monospace,monospace;">0</div>
+    {% endfor %}
+  </div>
+  <p class="subtitle" style="margin-top:4px;">受注商談 {{ snapshot.payload.revenue.deal_count }}件</p>
+</div>
+
+<div class="field-row">
+  <div class="card">
+    <h2>商品グループ別</h2>
+    {% if snapshot.payload.revenue.by_product_group %}
+    <table>
+      <thead><tr><th>商品グループ</th><th>金額</th><th>明細数</th></tr></thead>
+      <tbody>
+        {% for row in snapshot.payload.revenue.by_product_group %}
+        <tr><td>{{ row.label }}</td><td class="mono">{{ "{:,.0f}".format(row.amount|float) }}</td><td class="mono">{{ row.count }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty-state">データがありません。</div>{% endif %}
+  </div>
+  <div class="card">
+    <h2>取引先別</h2>
+    {% if snapshot.payload.revenue.by_account %}
+    <table>
+      <thead><tr><th>取引先</th><th>金額</th><th>商談数</th></tr></thead>
+      <tbody>
+        {% for row in snapshot.payload.revenue.by_account %}
+        <tr><td>{{ row.label }}</td><td class="mono">{{ "{:,.0f}".format(row.amount|float) }}</td><td class="mono">{{ row.count }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty-state">データがありません。</div>{% endif %}
+  </div>
+</div>
+
+<div class="field-row">
+  <div class="card">
+    <h2>セールスグループ別</h2>
+    {% if snapshot.payload.revenue.by_sales_group %}
+    <table>
+      <thead><tr><th>セールスグループ</th><th>金額</th><th>商談数</th></tr></thead>
+      <tbody>
+        {% for row in snapshot.payload.revenue.by_sales_group %}
+        <tr><td>{{ row.label }}</td><td class="mono">{{ "{:,.0f}".format(row.amount|float) }}</td><td class="mono">{{ row.count }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty-state">データがありません。</div>{% endif %}
+  </div>
+  <div class="card">
+    <h2>関係性別(新規/更新/Upsell/Cross-sell)</h2>
+    {% if snapshot.payload.revenue.by_relationship %}
+    <table>
+      <thead><tr><th>関係性</th><th>金額</th><th>商談数</th></tr></thead>
+      <tbody>
+        {% for row in snapshot.payload.revenue.by_relationship %}
+        <tr><td>{{ row.label }}</td><td class="mono">{{ "{:,.0f}".format(row.amount|float) }}</td><td class="mono">{{ row.count }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty-state">データがありません。</div>{% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>パイプライン</h2>
+  {% if snapshot.payload.pipeline.available %}
+  <p class="subtitle">
+    更新未着手の契約 {{ snapshot.payload.pipeline.renewal_candidates }}件
+    (うち期限超過 {{ snapshot.payload.pipeline.renewal_overdue }}件)
+  </p>
+  <table>
+    <thead><tr><th>ステージ</th><th>件数</th></tr></thead>
+    <tbody>
+      {% for stage, count in snapshot.payload.pipeline.stage_counts.items() %}
+      <tr><td>{{ stage_labels.get(stage, stage) }}</td><td class="mono">{{ count }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">この日付のパイプライン内訳データはありません(日次スナップショットが未取得です)。</div>
+  {% endif %}
+</div>
+
+<div class="field-row">
+  <div class="card">
+    <h2>キャンペーン効果</h2>
+    {% if snapshot.payload.campaigns %}
+    <table>
+      <thead><tr><th>名前</th><th>リード数</th><th>案件化数</th><th>転換率</th></tr></thead>
+      <tbody>
+        {% for c in snapshot.payload.campaigns %}
+        <tr><td>{{ c.name }}</td><td class="mono">{{ c.lead_count }}</td><td class="mono">{{ c.converted_count }}</td><td class="mono">{{ c.conversion_rate }}%</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty-state">データがありません。</div>{% endif %}
+  </div>
+  <div class="card">
+    <h2>シーケンス効果</h2>
+    {% if snapshot.payload.sequences %}
+    <table>
+      <thead><tr><th>名前</th><th>登録数</th><th>最終到達率</th></tr></thead>
+      <tbody>
+        {% for s in snapshot.payload.sequences %}
+        <tr><td>{{ s.name }}</td><td class="mono">{{ s.total_enrolled }}</td><td class="mono">{{ s.final_reach_pct }}%</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty-state">データがありません。</div>{% endif %}
+  </div>
+</div>
+{% endblock %}

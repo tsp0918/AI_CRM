@@ -14,6 +14,7 @@ from .user import User
 from .pricing import EngagementLineItem, Product
 from .quoting import Contract, ContractLineItem, Quote, QuoteLineItem
 from .weekly_review import WeeklyReview
+from .report_snapshot import ReportSnapshot
 
 __all__ = [
     "Account", "Contact", "ComplianceStatus",
@@ -28,4 +29,5 @@ __all__ = [
     "Product", "EngagementLineItem",
     "Quote", "QuoteLineItem", "Contract", "ContractLineItem",
     "WeeklyReview",
+    "ReportSnapshot",
 ]

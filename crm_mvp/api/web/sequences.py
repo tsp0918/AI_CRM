@@ -11,14 +11,14 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ...enums import SequenceEnrollmentStatus, SequenceStepChannel, TouchChannel
-from ...models import Sequence, SequenceEnrollment, SequenceStep
+from ...enums import SequenceStepChannel, TouchChannel
+from ...models import Sequence
 from ...services.lead_scoring import HIGH_INTENT_CHANNELS
 from ...services.sequences import (
-    SEQUENCE_END, create_sequence, generate_due_drafts, sequence_funnel,
+    SEQUENCE_END, create_sequence, generate_due_drafts, list_sequence_summaries,
+    sequence_funnel,
 )
 from .common import base_context, redirect_with_flash
 from .leads import LEAD_STATUS_LABELS, TOUCH_CHANNEL_LABELS
@@ -54,35 +54,7 @@ def sequences_list(
     ui_session: UiSession = Depends(require_ui_session),
     session: Session = Depends(get_ui_db_session),
 ) -> HTMLResponse:
-    sequences = session.execute(
-        select(Sequence).where(Sequence.tenant_id == ui_session.tenant_id)
-        .order_by(Sequence.created_at.desc())
-    ).scalars().all()
-
-    rows = []
-    for seq in sequences:
-        step_count = session.execute(
-            select(func.count()).select_from(SequenceStep).where(
-                SequenceStep.tenant_id == ui_session.tenant_id,
-                SequenceStep.sequence_id == seq.id,
-            )
-        ).scalar_one()
-        active_count = session.execute(
-            select(func.count()).select_from(SequenceEnrollment).where(
-                SequenceEnrollment.tenant_id == ui_session.tenant_id,
-                SequenceEnrollment.sequence_id == seq.id,
-                SequenceEnrollment.status == SequenceEnrollmentStatus.ACTIVE,
-            )
-        ).scalar_one()
-        # 最終ステップまでの到達率を簡易的な効果指標として一覧に出す
-        # (詳細画面のファネルを軽量に呼び出すだけ — シーケンス数は少ない
-        # 前提で、step_count/active_countと同程度のコスト感を許容する)。
-        funnel = sequence_funnel(session, ui_session.tenant_id, seq.id)
-        final_reach_pct = funnel["steps"][-1]["reached_pct"] if funnel["steps"] else 0
-        rows.append({
-            "sequence": seq, "step_count": step_count, "active_count": active_count,
-            "total_enrolled": funnel["total_enrolled"], "final_reach_pct": final_reach_pct,
-        })
+    rows = list_sequence_summaries(session, ui_session.tenant_id)
 
     context = base_context(
         session, ui_session, active_nav="sequences", request=request, flash=flash, flash_type=flash_type,

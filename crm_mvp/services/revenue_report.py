@@ -35,6 +35,30 @@ from ..models import (
 from .account_hierarchy import list_accounts
 
 
+def _closed_at_by_engagement(
+    session: Session, tenant_id: uuid.UUID, engagement_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, date]:
+    """各エンゲージメントについて、closed_wonへの最新の遷移日を返す
+    (同じエンゲージメントに複数回to_stage=CLOSED_WONの遷移があっても
+    最新のものを採用する)。as_of指定時の「その時点で受注済みだったか」
+    判定と、期間軸(period_date)の両方で使う共通ロジック。"""
+    if not engagement_ids:
+        return {}
+    closed_at: dict[uuid.UUID, date] = {}
+    transitions = session.execute(
+        select(StageTransition)
+        .where(
+            StageTransition.tenant_id == tenant_id,
+            StageTransition.engagement_id.in_(engagement_ids),
+            StageTransition.to_stage == Stage.CLOSED_WON,
+        )
+        .order_by(StageTransition.occurred_at.desc())
+    ).scalars()
+    for t in transitions:
+        closed_at.setdefault(t.engagement_id, t.occurred_at.date())
+    return closed_at
+
+
 def _engagement_revenue_from_contracts(
     session: Session, tenant_id: uuid.UUID, engagement_ids: list[uuid.UUID],
 ) -> tuple[dict[uuid.UUID, Decimal], set[uuid.UUID]]:
@@ -52,10 +76,16 @@ def _engagement_revenue_from_contracts(
     return by_engagement, has_contract
 
 
-def closed_won_revenue_rows(session: Session, tenant_id: uuid.UUID) -> list[dict]:
+def closed_won_revenue_rows(
+    session: Session, tenant_id: uuid.UUID, as_of: date | None = None,
+) -> list[dict]:
     """closed_won の商談ごとに、実売上額・取引先(法人グループの頂点まで
     ロールアップ)・セールスグループ・関係性(新規/更新/Upsell/Cross-sell)
-    をまとめた行を返す。画面側はこれを好きな軸で集計する。"""
+    をまとめた行を返す。画面側はこれを好きな軸で集計する。
+
+    as_of を指定すると、「その時点までに受注していた商談」だけに絞る
+    (経営レポートのスナップショットで過去時点を再構成するために使う)。
+    現在の画面(as_of=None)の挙動は変えない。"""
     engagements = session.execute(
         select(Engagement).where(
             Engagement.tenant_id == tenant_id, Engagement.stage == Stage.CLOSED_WON,
@@ -64,6 +94,16 @@ def closed_won_revenue_rows(session: Session, tenant_id: uuid.UUID) -> list[dict
     if not engagements:
         return []
     engagement_ids = [e.id for e in engagements]
+
+    if as_of is not None:
+        closed_at = _closed_at_by_engagement(session, tenant_id, engagement_ids)
+        engagements = [
+            e for e in engagements
+            if e.id in closed_at and closed_at[e.id] <= as_of
+        ]
+        if not engagements:
+            return []
+        engagement_ids = [e.id for e in engagements]
 
     revenue_by_engagement, has_contract = _engagement_revenue_from_contracts(
         session, tenant_id, engagement_ids,
@@ -145,10 +185,12 @@ def aggregate_by(
     )
 
 
-def product_group_revenue(session: Session, tenant_id: uuid.UUID) -> list[dict]:
+def product_group_revenue(
+    session: Session, tenant_id: uuid.UUID, as_of: date | None = None,
+) -> list[dict]:
     """closed_won 商談の明細(Contractがあればその明細、無ければ
     EngagementLineItem)を商品グループ単位で集計する。"""
-    facts = line_item_facts(session, tenant_id)
+    facts = line_item_facts(session, tenant_id, as_of=as_of)
     return aggregate_by(
         facts,
         lambda f: f["product_group"].name if f["product_group"] else "未分類",
@@ -177,10 +219,14 @@ STAGE_REPORT_LABELS = {
 
 def _line_item_facts(
     session: Session, tenant_id: uuid.UUID, stages: list[Stage] | None,
+    as_of: date | None = None,
 ) -> list[dict]:
     """stages=None は全ステージ対象(動的レポートビルダー用)。closed_won の
     エンゲージメントは従来どおり Contract 優先(無ければ EngagementLineItem)、
-    それ以外のステージは Contract が存在しないため常に EngagementLineItem。"""
+    それ以外のステージは Contract が存在しないため常に EngagementLineItem。
+    as_of指定時は、closed_wonエンゲージメントを「その時点までに受注して
+    いたもの」だけに絞る(それ以外のステージへのas_ofの意味付けは無い
+    ため、closed_won以外はas_ofを無視する)。"""
     query = select(Engagement.id).where(Engagement.tenant_id == tenant_id)
     if stages is not None:
         query = query.where(Engagement.stage.in_(stages))
@@ -196,6 +242,22 @@ def _line_item_facts(
     closed_won_ids = [
         eid for eid, e in engagements.items() if e.stage == Stage.CLOSED_WON
     ]
+
+    if as_of is not None and closed_won_ids:
+        closed_at = _closed_at_by_engagement(session, tenant_id, closed_won_ids)
+        closed_won_ids = [
+            eid for eid in closed_won_ids
+            if eid in closed_at and closed_at[eid] <= as_of
+        ]
+        excluded_ids = {
+            eid for eid in engagements
+            if engagements[eid].stage == Stage.CLOSED_WON and eid not in closed_won_ids
+        }
+        if excluded_ids:
+            engagement_ids = [eid for eid in engagement_ids if eid not in excluded_ids]
+            engagements = {
+                eid: e for eid, e in engagements.items() if eid not in excluded_ids
+            }
 
     contracts = session.execute(
         select(Contract).where(
@@ -300,8 +362,10 @@ def _line_item_facts(
     return facts
 
 
-def line_item_facts(session: Session, tenant_id: uuid.UUID) -> list[dict]:
-    return _line_item_facts(session, tenant_id, stages=[Stage.CLOSED_WON])
+def line_item_facts(
+    session: Session, tenant_id: uuid.UUID, as_of: date | None = None,
+) -> list[dict]:
+    return _line_item_facts(session, tenant_id, stages=[Stage.CLOSED_WON], as_of=as_of)
 
 
 def all_stage_line_item_facts(session: Session, tenant_id: uuid.UUID) -> list[dict]:

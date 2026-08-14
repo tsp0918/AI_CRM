@@ -1,0 +1,94 @@
+{% extends "_base.html" %}
+
+{% block title %}スナップショット比較 | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<p><a href="/ui/reports/history">&larr; スナップショット履歴に戻る</a></p>
+<h1>スナップショット比較</h1>
+
+<div class="card">
+  <form method="get" action="/ui/reports/history/compare" class="field-row">
+    <div>
+      <label for="from_id">起点(古い方)</label>
+      <select id="from_id" name="from_id">
+        {% for s in snapshots %}
+        <option value="{{ s.id }}" {% if s.id|string == from_id %}selected{% endif %}>{{ s.snapshot_date }}{% if s.label %}({{ s.label }}){% endif %}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="to_id">終点(新しい方)</label>
+      <select id="to_id" name="to_id">
+        {% for s in snapshots %}
+        <option value="{{ s.id }}" {% if s.id|string == to_id %}selected{% endif %}>{{ s.snapshot_date }}{% if s.label %}({{ s.label }}){% endif %}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="flex:none; padding-bottom:14px;">
+      <button type="submit" class="btn">比較する</button>
+    </div>
+  </form>
+</div>
+
+{% if diff %}
+<div class="card">
+  <h2>{{ from_snapshot.snapshot_date }} &rarr; {{ to_snapshot.snapshot_date }}</h2>
+
+  <h3 style="font-size:14px; margin:16px 0 8px;">売上</h3>
+  <table>
+    <thead><tr><th>通貨</th><th>起点</th><th>終点</th><th>差分</th></tr></thead>
+    <tbody>
+      {% for row in diff.revenue %}
+      <tr>
+        <td>{{ row.currency }}</td>
+        <td class="mono">{{ "{:,.0f}".format(row.from|float) }}</td>
+        <td class="mono">{{ "{:,.0f}".format(row.to|float) }}</td>
+        <td class="mono" style="{% if row.delta > 0 %}color:#2f6f5e;{% elif row.delta < 0 %}color:#a13f22;{% endif %}">
+          {{ "{:+,.0f}".format(row.delta|float) }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="subtitle" style="margin-top:8px;">
+    受注商談数: {{ diff.deal_count_from }} &rarr; {{ diff.deal_count_to }}
+  </p>
+
+  <h3 style="font-size:14px; margin:20px 0 8px;">キャンペーン効果</h3>
+  {% if diff.campaigns %}
+  <table>
+    <thead><tr><th>名前</th><th>リード数</th><th>転換率</th></tr></thead>
+    <tbody>
+      {% for row in diff.campaigns %}
+      <tr>
+        <td>{{ row.name }}</td>
+        <td class="mono">{{ row.lead_count_from }} &rarr; {{ row.lead_count_to }}</td>
+        <td class="mono">{{ row.conversion_rate_from }}% &rarr; {{ row.conversion_rate_to }}%</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty-state">データがありません。</div>{% endif %}
+
+  <h3 style="font-size:14px; margin:20px 0 8px;">シーケンス効果</h3>
+  {% if diff.sequences %}
+  <table>
+    <thead><tr><th>名前</th><th>登録数</th><th>最終到達率</th></tr></thead>
+    <tbody>
+      {% for row in diff.sequences %}
+      <tr>
+        <td>{{ row.name }}</td>
+        <td class="mono">{{ row.total_enrolled_from }} &rarr; {{ row.total_enrolled_to }}</td>
+        <td class="mono">{{ row.final_reach_pct_from }}% &rarr; {{ row.final_reach_pct_to }}%</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty-state">データがありません。</div>{% endif %}
+</div>
+{% elif snapshots %}
+<div class="card"><div class="empty-state">起点・終点を選んで「比較する」を押してください。</div></div>
+{% else %}
+<div class="card"><div class="empty-state">まだスナップショットがありません。<a href="/ui/reports/history">スナップショット履歴</a>から保存してください。</div></div>
+{% endif %}
+{% endblock %}
