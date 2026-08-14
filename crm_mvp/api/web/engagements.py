@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from ...enums import (
     Confidence, ContractStatus, Criterion, EngagementRelationshipType,
-    ProposalStatus, QuoteStatus, Stage, VerificationMethod,
+    ProposalStatus, QuoteStatus, ReviewStatus, Stage, VerificationMethod,
 )
 from ...models import (
     Account, ActionItem, Campaign, Contract, Engagement, EngagementLineItem,
@@ -41,12 +41,23 @@ from ...services.stage_transitions import (
     STAGE_ORDER, apply_stage_transition, evaluate_stage_gate, load_gate_context,
     next_stage,
 )
+from ...services.weekly_review import (
+    compute_week_over_week_diff, get_or_create_current_review, get_review_for_week,
+    update_review,
+)
 from .common import CRITERION_LABELS, base_context, redirect_with_flash
 from .leads import SOURCE_CHANNEL_LABELS, TOUCH_CHANNEL_LABELS
 from .session import UiSession, get_ui_db_session, require_ui_session
 from .templates import templates
 
 router = APIRouter(tags=["web"])
+
+REVIEW_STATUS_LABELS = {
+    "on_track": "順調", "at_risk": "要注意", "escalate": "エスカレーション",
+}
+REVIEW_STATUS_BADGE = {
+    "on_track": "badge-gate-ok", "at_risk": "badge-gate-warn", "escalate": "badge-gate-block",
+}
 
 
 # --- 新規案件作成 ------------------------------------------------------------
@@ -107,11 +118,13 @@ def _get_engagement_or_404(
 def engagement_detail(
     request: Request,
     engagement_id: uuid.UUID,
+    tab: str = "rep",
     flash: str | None = None,
     flash_type: str = "info",
     ui_session: UiSession = Depends(require_ui_session),
     session: Session = Depends(get_ui_db_session),
 ) -> HTMLResponse:
+    tab = tab if tab in ("rep", "manager") else "rep"
     engagement = _get_engagement_or_404(session, ui_session, engagement_id)
     account = session.get(Account, engagement.account_id)
 
@@ -174,8 +187,19 @@ def engagement_detail(
         gate_ctx["slots"], gate_ctx["nodes"], gate_ctx["edges"], gate_ctx["roles"],
     )
     reasons = score_reasons(score, CRITERION_LABELS)
+    role_count = len(gate_ctx["roles"])
 
     open_actions = list_open_action_items(session, ui_session.tenant_id, engagement.id)
+
+    # 週次レビュー(固定エリア): 今週分は無ければ作成、先週分は読み取り専用。
+    current_review = get_or_create_current_review(
+        session, ui_session.tenant_id, engagement.id, actor=f"human:{ui_session.actor_id}",
+    )
+    previous_review = get_review_for_week(
+        session, ui_session.tenant_id, engagement.id,
+        current_review.week_start_date - timedelta(days=7),
+    )
+    review_diff = compute_week_over_week_diff(session, ui_session.tenant_id, engagement, score)
 
     originating_lead = None
     originating_campaign = None
@@ -246,6 +270,12 @@ def engagement_detail(
         "relationship_type_values": list(EngagementRelationshipType),
         "sales_groups": sales_groups, "current_sales_group": current_sales_group,
         "current_owner_user": current_owner_user,
+        "role_count": role_count, "tab": tab, "today": date.today(),
+        "current_review": current_review, "previous_review": previous_review,
+        "review_diff": review_diff,
+        "review_status_values": list(ReviewStatus),
+        "review_status_labels": REVIEW_STATUS_LABELS,
+        "review_status_badge": REVIEW_STATUS_BADGE,
     })
     return templates.TemplateResponse(request, "engagement_detail.html", context)
 
@@ -514,6 +544,30 @@ def dismiss_action_item_ui(
     dismiss_action_item(action, note=note.strip() or None)
     session.commit()
     return redirect_with_flash(f"/ui/engagements/{engagement_id}", "アクションを却下にしました")
+
+
+# --- 週次レビュー(1on1) ------------------------------------------------------
+
+@router.post("/ui/engagements/{engagement_id}/review")
+def update_current_review_ui(
+    engagement_id: uuid.UUID,
+    rep_comment: str = Form(""),
+    manager_comment: str = Form(""),
+    manager_status: str = Form(""),
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> RedirectResponse:
+    """今週分のレビューだけを対象にする(先週以前は読み取り専用)。"""
+    _get_engagement_or_404(session, ui_session, engagement_id)
+    review = get_or_create_current_review(
+        session, ui_session.tenant_id, engagement_id, actor=f"human:{ui_session.actor_id}",
+    )
+    update_review(
+        review, rep_comment=rep_comment, manager_comment=manager_comment,
+        manager_status=manager_status,
+    )
+    session.commit()
+    return redirect_with_flash(f"/ui/engagements/{engagement_id}", "週次レビューを更新しました")
 
 
 # --- 金額の手動編集(商品構成が無い案件のみ) -----------------------------------

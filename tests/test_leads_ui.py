@@ -224,7 +224,9 @@ class TestEngagementLeadSummary:
         assert resp.status_code == 303
         engagement_url = resp.headers["location"]
 
-        detail_resp = ui_client.get(engagement_url)
+        # リード発生経緯は「状況を把握する」(マネージャー向け)タブにある
+        separator = "&" if "?" in engagement_url else "?"
+        detail_resp = ui_client.get(f"{engagement_url}{separator}tab=manager")
         assert detail_resp.status_code == 200
         assert "リード発生経緯" in detail_resp.text
         assert lead.full_name in detail_resp.text

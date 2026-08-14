@@ -39,21 +39,7 @@
   </details>
 </p>
 
-<nav class="section-nav">
-  <a href="#score">スコア</a>
-  {% if originating_lead %}<a href="#lead-origin">リード起源</a>{% endif %}
-  <a href="#activity">活動</a>
-  <a href="#line-items">商品構成</a>
-  <a href="#quotes">見積</a>
-  <a href="#contracts">契約</a>
-  <a href="#child-engagements">派生商談</a>
-  <a href="#stage">ステージ</a>
-  {% if open_actions %}<a href="#actions">アクション</a>{% endif %}
-  <a href="#qualification">クオリフィケーション</a>
-  <a href="#proposals">提案待ち</a>
-  <a href="#sources">取込情報</a>
-  <a href="#graph">相関図</a>
-</nav>
+<!-- ============ 固定エリア(担当者・マネージャー共通) ============ -->
 
 <!-- 客観的クロージング確度スコア -->
 <div class="card" id="score">
@@ -79,78 +65,162 @@
       {% else %}
       <p class="muted" style="margin:10px 0 0; font-size:12px;">減点要因はありません。</p>
       {% endif %}
-    </div>
-  </div>
-</div>
-
-{% if originating_lead %}
-{% set snap = originating_lead.conversion_snapshot %}
-<!-- リード発生経緯(案件化した瞬間のリードサマリー) -->
-<div class="card" id="lead-origin">
-  <h2>リード発生経緯</h2>
-  <p class="subtitle" style="margin-bottom:12px;">
-    <a href="/ui/leads/{{ originating_lead.id }}">{{ originating_lead.full_name }}</a> 様のリードから、
-    {{ originating_lead.converted_at.strftime("%Y-%m-%d") if originating_lead.converted_at else "—" }} に案件化されました。
-  </p>
-  {% if snap %}
-  <div class="field-row">
-    <div>
-      <p class="subtitle" style="margin-bottom:4px;">案件化時点の温度</p>
-      <span class="quadrant-badge quadrant-{{ snap.quadrant }}">{{ snap.quadrant }}</span>
-      <span class="mono" style="margin-left:8px; font-size:13px;">Company {{ snap.company_score }} / Person {{ snap.person_score }}</span>
-    </div>
-    <div>
-      <p class="subtitle" style="margin-bottom:4px;">獲得経路</p>
-      <p style="margin:0; font-size:13px;">
-        {{ source_channel_labels.get(snap.source_channel, snap.source_channel) if snap.source_channel else "未設定" }}
-        {% if originating_campaign %} / {{ originating_campaign.name }}{% endif %}
+      <p class="subtitle" style="margin:10px 0 0;">
+        登場人物 {{ role_count }}名 / 決裁者:
+        {% if score.decider_engaged %}<span class="badge badge-gate-ok">到達済み</span>
+        {% elif score.decider_reachable %}<span class="badge badge-gate-warn">経路あり(未接触)</span>
+        {% else %}<span class="badge badge-gate-block">未到達</span>{% endif %}
+        <a href="#graph" style="margin-left:6px; font-size:12px;">相関図を見る(状況を把握するタブ)&rarr;</a>
       </p>
     </div>
   </div>
-  {% if snap.touch_channel_counts %}
-  <p class="subtitle" style="margin:12px 0 4px;">
-    案件化までの接点({{ snap.touch_count }}件・リードとして{{ snap.days_as_lead }}日間)
-  </p>
-  <ul style="font-size:13px; padding-left:18px; margin:0;">
-    {% for ch, count in snap.touch_channel_counts.items() %}
-    <li>{{ touch_channel_labels.get(ch, ch) }}: {{ count }}件</li>
-    {% endfor %}
-  </ul>
-  {% endif %}
-  {% if snap.company_reasons or snap.person_reasons %}
-  <p class="subtitle" style="margin:12px 0 4px;">スコアの根拠(案件化時点)</p>
-  <ul style="font-size:12px; color:#4b5563; padding-left:18px; margin:0;">
-    {% for r in snap.company_reasons %}<li>{{ r }}</li>{% endfor %}
-    {% for r in snap.person_reasons %}<li>{{ r }}</li>{% endfor %}
-  </ul>
-  {% endif %}
-  {% endif %}
-  <p style="margin-top:12px;"><a href="/ui/leads/{{ originating_lead.id }}">リード詳細を見る(全接点・シーケンス履歴)&rarr;</a></p>
 </div>
-{% endif %}
 
-<!-- 最近の活動 -->
-<div class="card" id="activity">
-  <h2>最近の活動</h2>
-  {% if recent_activity %}
-    <table>
-      <thead><tr><th>日時</th><th>種別</th><th>内容</th><th>誰が</th></tr></thead>
-      <tbody>
-        {% for item in recent_activity %}
-        <tr>
-          <td class="mono" style="font-size:11px;">{{ item.occurred_at.strftime("%Y-%m-%d %H:%M") }}</td>
-          <td>{{ item.title }}</td>
-          <td style="max-width:420px;">{{ item.detail }}</td>
-          <td class="muted">{{ item.actor or "—" }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    <p style="margin-top:10px;"><a href="/ui/engagements/{{ engagement.id }}/activity">すべての活動を見る &rarr;</a></p>
+<!-- 週次レビュー(1on1) -->
+<div class="card" id="weekly-review">
+  <h2>週次レビュー</h2>
+  {% if review_diff.has_baseline %}
+  <p class="subtitle" style="margin-bottom:12px;">
+    前回スナップショット({{ review_diff.snapshot_date }})比:
+    確度スコア {{ "+" if review_diff.score_delta >= 0 else "" }}{{ review_diff.score_delta }}pt
+    {% if review_diff.amount_delta is not none %}
+      / 金額 {{ "+" if review_diff.amount_delta >= 0 else "" }}{{ "{:,.0f}".format(review_diff.amount_delta) }}
+    {% endif %}
+    {% if review_diff.stage_changed %}
+      / ステージ変化: {{ stage_labels.get(review_diff.previous_stage, review_diff.previous_stage) }} &rarr; {{ stage_labels.get(engagement.stage, engagement.stage) }}
+    {% endif %}
+  </p>
   {% else %}
-    <div class="empty-state">まだ活動記録がありません。</div>
+  <p class="subtitle" style="margin-bottom:12px;">
+    前週との比較データがまだありません(日次スナップショットが未取得です)。
+  </p>
   {% endif %}
+
+  <div class="field-row">
+    <div>
+      <div class="status-section-label">
+        先週{% if previous_review %}({{ previous_review.week_start_date }}){% endif %}
+      </div>
+      {% if previous_review %}
+      <p style="font-size:12px; color:#6b7280; margin:0 0 4px;">担当者コメント</p>
+      <div class="quote-box">{{ previous_review.rep_comment or "(記入なし)" }}</div>
+      <p style="font-size:12px; color:#6b7280; margin:8px 0 4px;">
+        マネージャーコメント
+        {% if previous_review.manager_status %}
+        <span class="badge {{ review_status_badge.get(previous_review.manager_status, '') }}">{{ review_status_labels.get(previous_review.manager_status, previous_review.manager_status) }}</span>
+        {% endif %}
+      </p>
+      <div class="quote-box">{{ previous_review.manager_comment or "(記入なし)" }}</div>
+      {% else %}
+      <div class="empty-state">先週のレビューはありません。</div>
+      {% endif %}
+    </div>
+    <div>
+      <div class="status-section-label">今週({{ current_review.week_start_date }})</div>
+      <form method="post" action="/ui/engagements/{{ engagement.id }}/review">
+        <label for="rep_comment">担当者コメント</label>
+        <textarea id="rep_comment" name="rep_comment" style="min-height:70px;">{{ current_review.rep_comment or "" }}</textarea>
+        <label for="manager_comment">マネージャーコメント</label>
+        <textarea id="manager_comment" name="manager_comment" style="min-height:70px;">{{ current_review.manager_comment or "" }}</textarea>
+        <label for="manager_status">ステータス</label>
+        <select id="manager_status" name="manager_status">
+          <option value="">(未設定)</option>
+          {% for s in review_status_values %}
+          <option value="{{ s.value }}" {% if current_review.manager_status == s.value %}selected{% endif %}>
+            {{ review_status_labels.get(s.value, s.value) }}
+          </option>
+          {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-sm">保存する</button>
+      </form>
+    </div>
+  </div>
 </div>
+
+<!-- アクションタスク(ToDo表) -->
+<div class="card" id="actions">
+  <h2>アクションタスク({{ open_actions | length }}件)</h2>
+  {% if open_actions %}
+  <table>
+    <thead><tr><th>タスク内容</th><th>担当</th><th>期限</th><th></th></tr></thead>
+    <tbody>
+      {% for a in open_actions %}
+      <tr>
+        <td>{{ a.play or a.reason }}</td>
+        <td>{{ a.assigned_to }}</td>
+        <td>
+          {% if a.due_at %}
+            {% if a.due_at.date() < today %}
+            <span class="badge badge-gate-block">{{ a.due_at.strftime("%Y-%m-%d") }} 超過</span>
+            {% else %}
+            <span class="mono">{{ a.due_at.strftime("%Y-%m-%d") }}</span>
+            {% endif %}
+          {% else %}
+          <span class="muted">—</span>
+          {% endif %}
+        </td>
+        <td>
+          <form method="post" action="/ui/engagements/{{ engagement.id }}/actions/{{ a.id }}/complete" class="inline">
+            <button type="submit" class="btn btn-sm">完了</button>
+          </form>
+          <form method="post" action="/ui/engagements/{{ engagement.id }}/actions/{{ a.id }}/dismiss" class="inline">
+            <button type="submit" class="btn btn-sm btn-secondary">却下</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">アクションタスクはありません。</div>
+  {% endif %}
+
+  <details style="margin-top:14px;">
+    <summary style="cursor:pointer; font-size:13px; color:#2563eb;">+ タスクを追加する</summary>
+    <form method="post" action="/ui/engagements/{{ engagement.id }}/actions/manual" style="margin-top:10px; max-width:420px;">
+      <label for="manual_task">タスク内容</label>
+      <textarea id="manual_task" name="task" required placeholder="例: 来週までに提案資料をレビューする"></textarea>
+      <div class="field-row">
+        <div>
+          <label for="manual_assigned_to">担当者名</label>
+          <input type="text" id="manual_assigned_to" name="assigned_to" required placeholder="例: 佐藤 健">
+        </div>
+        <div>
+          <label for="manual_due_at">期限(任意)</label>
+          <input type="date" id="manual_due_at" name="due_at">
+        </div>
+      </div>
+      <button type="submit" class="btn btn-sm">追加する</button>
+    </form>
+  </details>
+</div>
+
+<!-- ============ タブ切り替え ============ -->
+
+<div class="facet-tabs" style="max-width:420px; margin:20px 0 4px;">
+  <a href="?tab=rep" class="{% if tab == 'rep' %}active{% endif %}">商談を進める</a>
+  <a href="?tab=manager" class="{% if tab == 'manager' %}active{% endif %}">状況を把握する</a>
+</div>
+
+<nav class="section-nav">
+  {% if tab == 'rep' %}
+  <a href="#line-items">商品構成</a>
+  <a href="#quotes">見積</a>
+  <a href="#contracts">契約</a>
+  <a href="#stage">ステージ</a>
+  <a href="#qualification">クオリフィケーション</a>
+  <a href="#proposals">提案待ち</a>
+  <a href="#sources">取込情報</a>
+  <a href="#child-engagements">派生商談</a>
+  {% else %}
+  {% if originating_lead %}<a href="#lead-origin">リード起源</a>{% endif %}
+  <a href="#activity">活動</a>
+  <a href="#graph">相関図</a>
+  {% endif %}
+</nav>
+
+{% if tab == 'rep' %}
+<!-- ============ タブ: 商談を進める(担当者向け) ============ -->
 
 <!-- 商品構成(EngagementLineItem) -->
 <div class="card" id="line-items">
@@ -369,48 +439,6 @@
   {% endif %}
 </div>
 
-<!-- 派生商談(継続/Upsell/Cross-sell) -->
-<div class="card" id="child-engagements">
-  <h2>派生商談(継続/Upsell/Cross-sell)</h2>
-  <p class="subtitle" style="margin-bottom:12px;">
-    この商談を起点にした継続(更新)・Upsell・Cross-sellの商談です。
-  </p>
-  {% if child_engagements %}
-  <table>
-    <thead><tr><th>種別</th><th>商談名</th><th>ステージ</th><th>金額</th></tr></thead>
-    <tbody>
-      {% for c in child_engagements %}
-      <tr>
-        <td><span class="badge">{{ relationship_type_labels.get(c.relationship_type, c.relationship_type) }}</span></td>
-        <td><a href="/ui/engagements/{{ c.id }}">{{ c.name }}</a></td>
-        <td><span class="badge badge-stage-{{ c.stage }}">{{ stage_labels.get(c.stage, c.stage) }}</span></td>
-        <td class="mono">{% if c.amount %}{{ "{:,.0f}".format(c.amount) }} {{ c.currency }}{% else %}—{% endif %}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <div class="empty-state">まだ派生商談がありません。</div>
-  {% endif %}
-
-  {% if engagement.stage == "closed_won" %}
-  <details style="margin-top:14px;">
-    <summary style="cursor:pointer; font-size:13px; color:#2563eb;">+ 継続/Upsell/Cross-sell商談を作成</summary>
-    <form method="post" action="/ui/engagements/{{ engagement.id }}/child-engagements" style="margin-top:10px; max-width:420px;">
-      <label for="relationship_type">種別</label>
-      <select id="relationship_type" name="relationship_type">
-        {% for r in relationship_type_values %}
-        <option value="{{ r.value }}">{{ relationship_type_labels.get(r.value, r.value) }}</option>
-        {% endfor %}
-      </select>
-      <label for="child_name">商談名</label>
-      <input type="text" id="child_name" name="name" required placeholder="例: {{ engagement.name }}(更新)">
-      <button type="submit" class="btn btn-sm">作成する</button>
-    </form>
-  </details>
-  {% endif %}
-</div>
-
 <!-- ステージ / ゲート -->
 <div class="card" id="stage">
   <h2>ステージ</h2>
@@ -442,6 +470,8 @@
           <form method="post" action="/ui/engagements/{{ engagement.id }}/actions" style="margin-top:8px; max-width:320px;">
             <label for="assigned_to">担当者名</label>
             <input type="text" id="assigned_to" name="assigned_to" required placeholder="例: 佐藤 健">
+            <label for="due_at">期限(任意)</label>
+            <input type="date" id="due_at" name="due_at">
             <button type="submit" class="btn btn-sm">アサインする</button>
           </form>
         </details>
@@ -499,28 +529,6 @@
   </table>
   {% endif %}
 </div>
-
-<!-- アサイン済みのアクション -->
-{% if open_actions %}
-<div class="card" id="actions">
-  <h2>アサイン済みのアクション({{ open_actions | length }}件)</h2>
-  {% for a in open_actions %}
-  <div style="border-top:1px solid #eee; padding:12px 0;">
-    <div><strong>{{ a.assigned_to }}</strong>
-      <span class="muted" style="font-size:12px;">に {{ a.created_at.strftime("%Y-%m-%d") }} アサイン</span></div>
-    <div style="font-size:13px; color:#374151; margin-top:4px;">{{ a.play or a.reason }}</div>
-    <div style="margin-top:8px; display:flex; gap:10px; align-items:start;">
-      <form method="post" action="/ui/engagements/{{ engagement.id }}/actions/{{ a.id }}/complete" class="inline">
-        <button type="submit" class="btn btn-sm">完了</button>
-      </form>
-      <form method="post" action="/ui/engagements/{{ engagement.id }}/actions/{{ a.id }}/dismiss" class="inline">
-        <button type="submit" class="btn btn-sm btn-secondary">却下</button>
-      </form>
-    </div>
-  </div>
-  {% endfor %}
-</div>
-{% endif %}
 
 <!-- クオリフィケーション -->
 <div class="card" id="qualification">
@@ -630,10 +638,125 @@
   {% endif %}
 </div>
 
+<!-- 派生商談(継続/Upsell/Cross-sell) -->
+<div class="card" id="child-engagements">
+  <h2>派生商談(継続/Upsell/Cross-sell)</h2>
+  <p class="subtitle" style="margin-bottom:12px;">
+    この商談を起点にした継続(更新)・Upsell・Cross-sellの商談です。
+  </p>
+  {% if child_engagements %}
+  <table>
+    <thead><tr><th>種別</th><th>商談名</th><th>ステージ</th><th>金額</th></tr></thead>
+    <tbody>
+      {% for c in child_engagements %}
+      <tr>
+        <td><span class="badge">{{ relationship_type_labels.get(c.relationship_type, c.relationship_type) }}</span></td>
+        <td><a href="/ui/engagements/{{ c.id }}">{{ c.name }}</a></td>
+        <td><span class="badge badge-stage-{{ c.stage }}">{{ stage_labels.get(c.stage, c.stage) }}</span></td>
+        <td class="mono">{% if c.amount %}{{ "{:,.0f}".format(c.amount) }} {{ c.currency }}{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">まだ派生商談がありません。</div>
+  {% endif %}
+
+  {% if engagement.stage == "closed_won" %}
+  <details style="margin-top:14px;">
+    <summary style="cursor:pointer; font-size:13px; color:#2563eb;">+ 継続/Upsell/Cross-sell商談を作成</summary>
+    <form method="post" action="/ui/engagements/{{ engagement.id }}/child-engagements" style="margin-top:10px; max-width:420px;">
+      <label for="relationship_type">種別</label>
+      <select id="relationship_type" name="relationship_type">
+        {% for r in relationship_type_values %}
+        <option value="{{ r.value }}">{{ relationship_type_labels.get(r.value, r.value) }}</option>
+        {% endfor %}
+      </select>
+      <label for="child_name">商談名</label>
+      <input type="text" id="child_name" name="name" required placeholder="例: {{ engagement.name }}(更新)">
+      <button type="submit" class="btn btn-sm">作成する</button>
+    </form>
+  </details>
+  {% endif %}
+</div>
+
+{% else %}
+<!-- ============ タブ: 状況を把握する(マネージャー向け) ============ -->
+
+{% if originating_lead %}
+{% set snap = originating_lead.conversion_snapshot %}
+<!-- リード発生経緯(案件化した瞬間のリードサマリー) -->
+<div class="card" id="lead-origin">
+  <h2>リード発生経緯</h2>
+  <p class="subtitle" style="margin-bottom:12px;">
+    <a href="/ui/leads/{{ originating_lead.id }}">{{ originating_lead.full_name }}</a> 様のリードから、
+    {{ originating_lead.converted_at.strftime("%Y-%m-%d") if originating_lead.converted_at else "—" }} に案件化されました。
+  </p>
+  {% if snap %}
+  <div class="field-row">
+    <div>
+      <p class="subtitle" style="margin-bottom:4px;">案件化時点の温度</p>
+      <span class="quadrant-badge quadrant-{{ snap.quadrant }}">{{ snap.quadrant }}</span>
+      <span class="mono" style="margin-left:8px; font-size:13px;">Company {{ snap.company_score }} / Person {{ snap.person_score }}</span>
+    </div>
+    <div>
+      <p class="subtitle" style="margin-bottom:4px;">獲得経路</p>
+      <p style="margin:0; font-size:13px;">
+        {{ source_channel_labels.get(snap.source_channel, snap.source_channel) if snap.source_channel else "未設定" }}
+        {% if originating_campaign %} / {{ originating_campaign.name }}{% endif %}
+      </p>
+    </div>
+  </div>
+  {% if snap.touch_channel_counts %}
+  <p class="subtitle" style="margin:12px 0 4px;">
+    案件化までの接点({{ snap.touch_count }}件・リードとして{{ snap.days_as_lead }}日間)
+  </p>
+  <ul style="font-size:13px; padding-left:18px; margin:0;">
+    {% for ch, count in snap.touch_channel_counts.items() %}
+    <li>{{ touch_channel_labels.get(ch, ch) }}: {{ count }}件</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if snap.company_reasons or snap.person_reasons %}
+  <p class="subtitle" style="margin:12px 0 4px;">スコアの根拠(案件化時点)</p>
+  <ul style="font-size:12px; color:#4b5563; padding-left:18px; margin:0;">
+    {% for r in snap.company_reasons %}<li>{{ r }}</li>{% endfor %}
+    {% for r in snap.person_reasons %}<li>{{ r }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  {% endif %}
+  <p style="margin-top:12px;"><a href="/ui/leads/{{ originating_lead.id }}">リード詳細を見る(全接点・シーケンス履歴)&rarr;</a></p>
+</div>
+{% endif %}
+
+<!-- 最近の活動 -->
+<div class="card" id="activity">
+  <h2>最近の活動</h2>
+  {% if recent_activity %}
+    <table>
+      <thead><tr><th>日時</th><th>種別</th><th>内容</th><th>誰が</th></tr></thead>
+      <tbody>
+        {% for item in recent_activity %}
+        <tr>
+          <td class="mono" style="font-size:11px;">{{ item.occurred_at.strftime("%Y-%m-%d %H:%M") }}</td>
+          <td>{{ item.title }}</td>
+          <td style="max-width:420px;">{{ item.detail }}</td>
+          <td class="muted">{{ item.actor or "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p style="margin-top:10px;"><a href="/ui/engagements/{{ engagement.id }}/activity">すべての活動を見る &rarr;</a></p>
+  {% else %}
+    <div class="empty-state">まだ活動記録がありません。</div>
+  {% endif %}
+</div>
+
 <!-- 相関図 -->
 <div class="card" id="graph">
   <h2>バイヤー相関図</h2>
   <p class="subtitle" style="margin-bottom:12px;">登場人物 {{ node_count }} 名</p>
   <a href="/ui/engagements/{{ engagement.id }}/graph" class="btn btn-sm btn-secondary">相関図を見る</a>
 </div>
+{% endif %}
 {% endblock %}

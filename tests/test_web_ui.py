@@ -195,18 +195,106 @@ class TestEngagementDetail:
         resp = ui_client.get(f"/ui/engagements/{engagement.id}")
         assert resp.status_code == 404
 
-    def test_section_nav_ids_match_anchors(self, ui_client, db_session, tenant_id):
+    def test_section_nav_ids_match_anchors_rep_tab(self, ui_client, db_session, tenant_id):
         _, engagement = create_account_and_engagement(db_session, tenant_id)
         db_session.commit()
 
         resp = ui_client.get(f"/ui/engagements/{engagement.id}")
         assert resp.status_code == 200
         assert 'class="section-nav"' in resp.text
-        for section_id in ["score", "activity", "line-items", "quotes", "contracts",
+        for section_id in ["line-items", "quotes", "contracts",
                             "child-engagements", "stage", "qualification", "proposals",
-                            "sources", "graph"]:
+                            "sources"]:
             assert f'href="#{section_id}"' in resp.text
             assert f'id="{section_id}"' in resp.text
+        # 固定エリアのidは常に出るが、section-navのリンクとしては出ない
+        assert 'id="score"' in resp.text
+        assert 'id="weekly-review"' in resp.text
+        assert 'id="actions"' in resp.text
+
+    def test_section_nav_ids_match_anchors_manager_tab(self, ui_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        resp = ui_client.get(f"/ui/engagements/{engagement.id}?tab=manager")
+        assert resp.status_code == 200
+        for section_id in ["activity", "graph"]:
+            assert f'href="#{section_id}"' in resp.text
+            assert f'id="{section_id}"' in resp.text
+
+    def test_tab_switch_shows_different_cards(self, ui_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        rep_resp = ui_client.get(f"/ui/engagements/{engagement.id}")
+        assert 'id="line-items"' in rep_resp.text
+        assert 'id="graph"' not in rep_resp.text
+
+        manager_resp = ui_client.get(f"/ui/engagements/{engagement.id}?tab=manager")
+        assert 'id="graph"' in manager_resp.text
+        assert 'id="line-items"' not in manager_resp.text
+
+
+class TestWeeklyReviewUi:
+    def test_visiting_detail_page_shows_current_week_card(
+        self, ui_client, db_session, tenant_id,
+    ):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        resp = ui_client.get(f"/ui/engagements/{engagement.id}")
+        assert resp.status_code == 200
+        assert "週次レビュー" in resp.text
+        assert f'action="/ui/engagements/{engagement.id}/review"' in resp.text
+
+    def test_saves_comments_and_status(self, ui_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        resp = ui_client.post(
+            f"/ui/engagements/{engagement.id}/review",
+            data={
+                "rep_comment": "来週デモ予定",
+                "manager_comment": "順調に進んでいる",
+                "manager_status": "on_track",
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+
+        from crm_mvp.models import WeeklyReview
+        review = db_session.query(WeeklyReview).filter_by(
+            tenant_id=tenant_id, engagement_id=engagement.id,
+        ).one()
+        assert review.rep_comment == "来週デモ予定"
+        assert review.manager_comment == "順調に進んでいる"
+        assert review.manager_status == "on_track"
+
+        resp2 = ui_client.get(f"/ui/engagements/{engagement.id}")
+        assert "来週デモ予定" in resp2.text
+        assert "順調" in resp2.text
+
+    def test_no_baseline_message_when_no_snapshot(self, ui_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        resp = ui_client.get(f"/ui/engagements/{engagement.id}")
+        assert resp.status_code == 200
+        assert "前週との比較データがまだありません" in resp.text
+
+    def test_manual_action_task_shows_in_todo_table(self, ui_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        ui_client.post(
+            f"/ui/engagements/{engagement.id}/actions/manual",
+            data={"assigned_to": "鈴木 花子", "task": "1on1タスクA", "due_at": "2020-01-01"},
+        )
+
+        resp = ui_client.get(f"/ui/engagements/{engagement.id}")
+        assert resp.status_code == 200
+        assert "1on1タスクA" in resp.text
+        assert "超過" in resp.text  # 期限が過去なので超過バッジが出る
 
 
 class TestSourceIntake:
