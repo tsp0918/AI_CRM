@@ -156,6 +156,15 @@ class ActionItemStatus(StrEnum):
     DISMISSED = "dismissed"
 
 
+class ReviewStatus(StrEnum):
+    """週次レビューでマネージャーが付ける簡易ステータス(2026-08-14)。
+    自由記述のコメントだけだと横断的に拾えないため、タグとして持つ。"""
+
+    ON_TRACK = "on_track"       # 順調
+    AT_RISK = "at_risk"         # 要注意
+    ESCALATE = "escalate"       # エスカレーション
+
+
 class LeadStatus(StrEnum):
     """Lead(案件化前の見込み客)のライフサイクル。"""
 

@@ -13,6 +13,7 @@ from .sales_group import SalesGroup
 from .user import User
 from .pricing import EngagementLineItem, Product
 from .quoting import Contract, ContractLineItem, Quote, QuoteLineItem
+from .weekly_review import WeeklyReview
 
 __all__ = [
     "Account", "Contact", "ComplianceStatus",
@@ -26,4 +27,5 @@ __all__ = [
     "ErpMaterial", "ErpBusinessPartner", "ProductGroup", "SalesGroup", "User",
     "Product", "EngagementLineItem",
     "Quote", "QuoteLineItem", "Contract", "ContractLineItem",
+    "WeeklyReview",
 ]
