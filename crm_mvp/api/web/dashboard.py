@@ -11,6 +11,7 @@ Userとowner_user_idの構造が入った今でも「自分の担当」を見ら
 from __future__ import annotations
 
 import uuid
+from datetime import date
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
@@ -18,10 +19,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ...enums import Stage
-from ...models import Account, Engagement
+from ...models import Account, Engagement, WeeklyReview
 from ...services.confidence_score import compute_confidence_score
 from ...services.stage_transitions import load_gate_context
 from ...services.users import list_users
+from ...services.weekly_review import week_start
 from .common import base_context
 from .session import UiSession, get_ui_db_session, require_ui_session
 from .templates import templates
@@ -59,6 +61,21 @@ def dashboard(
             ).scalars()
         }
 
+    current_week_start = week_start(date.today())
+    reviewed_engagement_ids: set[uuid.UUID] = set()
+    if engagements:
+        engagement_ids = [e.id for e in engagements]
+        reviews = session.execute(
+            select(WeeklyReview).where(
+                WeeklyReview.tenant_id == ui_session.tenant_id,
+                WeeklyReview.week_start_date == current_week_start,
+                WeeklyReview.engagement_id.in_(engagement_ids),
+            )
+        ).scalars().all()
+        reviewed_engagement_ids = {
+            r.engagement_id for r in reviews if r.rep_comment or r.manager_comment
+        }
+
     rows = []
     for e in engagements:
         ctx = load_gate_context(session, ui_session.tenant_id, e)
@@ -70,6 +87,7 @@ def dashboard(
             "account_name": accounts[e.account_id].name
             if e.account_id in accounts else "—",
             "score": score,
+            "reviewed_this_week": e.id in reviewed_engagement_ids,
         })
 
     context = base_context(

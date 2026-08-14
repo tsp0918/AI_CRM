@@ -145,6 +145,53 @@ class TestDashboard:
         assert "Bの案件" not in main
 
 
+class TestDashboardReviewBadge:
+    def test_no_review_shows_unreviewed_badge(self, ui_client, db_session, tenant_id):
+        create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        resp = ui_client.get("/ui/")
+        assert resp.status_code == 200
+        main = _main_content(resp.text)
+        assert "未レビュー" in main
+        assert "レビュー済み" not in main
+
+    def test_review_with_comment_this_week_shows_reviewed_badge(
+        self, ui_client, db_session, tenant_id,
+    ):
+        from crm_mvp.services.weekly_review import get_or_create_current_review, update_review
+
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        db_session.flush()
+        review = get_or_create_current_review(
+            db_session, tenant_id, engagement.id, actor="human:manager-1",
+        )
+        update_review(review, rep_comment="デモ実施完了")
+        db_session.commit()
+
+        resp = ui_client.get("/ui/")
+        assert resp.status_code == 200
+        main = _main_content(resp.text)
+        assert "レビュー済み" in main
+        assert "未レビュー" not in main
+
+    def test_empty_review_row_still_counts_as_unreviewed(
+        self, ui_client, db_session, tenant_id,
+    ):
+        from crm_mvp.services.weekly_review import get_or_create_current_review
+
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        db_session.flush()
+        get_or_create_current_review(
+            db_session, tenant_id, engagement.id, actor="human:manager-1",
+        )
+        db_session.commit()
+
+        resp = ui_client.get("/ui/")
+        assert resp.status_code == 200
+        assert "未レビュー" in _main_content(resp.text)
+
+
 class TestEngagementCreation:
     def test_new_engagement_form_renders(self, ui_client):
         resp = ui_client.get("/ui/engagements/new")

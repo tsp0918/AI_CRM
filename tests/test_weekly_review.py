@@ -23,10 +23,10 @@ def make_score(total: int = 60) -> ConfidenceScore:
 class TestWeekStart:
     def test_rounds_down_to_monday(self):
         # 2026-08-14 は金曜日 -> その週の月曜は 2026-08-10
-        assert wr._week_start(date(2026, 8, 14)) == date(2026, 8, 10)
+        assert wr.week_start(date(2026, 8, 14)) == date(2026, 8, 10)
 
     def test_monday_stays_monday(self):
-        assert wr._week_start(date(2026, 8, 10)) == date(2026, 8, 10)
+        assert wr.week_start(date(2026, 8, 10)) == date(2026, 8, 10)
 
 
 class TestGetOrCreateCurrentReview:

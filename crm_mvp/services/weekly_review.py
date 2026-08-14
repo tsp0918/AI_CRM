@@ -24,7 +24,7 @@ from ..models import Engagement, PipelineSnapshot, WeeklyReview
 from .confidence_score import ConfidenceScore
 
 
-def _week_start(d: date) -> date:
+def week_start(d: date) -> date:
     """その日を含む週の月曜日を返す。"""
     return d - timedelta(days=d.weekday())
 
@@ -45,7 +45,7 @@ def get_or_create_current_review(
     session: Session, tenant_id: uuid.UUID, engagement_id: uuid.UUID, *,
     actor: str = "human:unknown", today: date | None = None,
 ) -> WeeklyReview:
-    week_start_date = _week_start(today or date.today())
+    week_start_date = week_start(today or date.today())
     review = get_review_for_week(session, tenant_id, engagement_id, week_start_date)
     if review is not None:
         return review
