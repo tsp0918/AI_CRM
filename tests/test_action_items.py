@@ -101,3 +101,54 @@ class TestListOpenActionItems:
 
         result = ai.list_open_action_items(db_session, uuid.uuid4(), engagement.id)
         assert result == []
+
+
+class TestDueAt:
+    def test_assign_action_item_stores_due_at(self, db_session, tenant_id):
+        from datetime import datetime, timezone
+
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        due = datetime(2026, 8, 20, tzinfo=timezone.utc)
+        item = ai.assign_action_item(
+            db_session, tenant_id, engagement.id, make_missing_item(),
+            assigned_to="佐藤 健", assigned_by="human:manager-1", due_at=due,
+        )
+        db_session.commit()
+
+        assert item.due_at == due
+
+    def test_assign_action_item_due_at_defaults_to_none(self, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        item = ai.assign_action_item(
+            db_session, tenant_id, engagement.id, make_missing_item(),
+            assigned_to="佐藤 健", assigned_by="human:manager-1",
+        )
+        assert item.due_at is None
+
+
+class TestCreateManualActionItem:
+    def test_creates_open_item_without_gate_context(self, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        item = ai.create_manual_action_item(
+            db_session, tenant_id, engagement.id,
+            assigned_to="鈴木 花子", task="来週までに提案資料をレビューする",
+            assigned_by="human:manager-1",
+        )
+        db_session.commit()
+
+        assert item.status == ActionItemStatus.OPEN
+        assert item.field_path == "manual"
+        assert item.reason == "来週までに提案資料をレビューする"
+        assert item.play is None
+
+    def test_appears_in_list_open_action_items(self, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        ai.create_manual_action_item(
+            db_session, tenant_id, engagement.id,
+            assigned_to="鈴木 花子", task="タスクA", assigned_by="human:manager-1",
+        )
+        db_session.commit()
+
+        result = ai.list_open_action_items(db_session, tenant_id, engagement.id)
+        assert len(result) == 1
+        assert result[0].reason == "タスクA"

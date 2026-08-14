@@ -813,6 +813,56 @@ class TestActionItemUi:
         db_session.refresh(item)
         assert item.status == "dismissed"
 
+    def test_assign_with_due_at_stores_it(self, ui_client, db_session, tenant_id):
+        self._seed_policy_with_missing_criterion(db_session, tenant_id)
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        resp = ui_client.post(
+            f"/ui/engagements/{engagement.id}/actions",
+            data={"assigned_to": "佐藤 健", "due_at": "2026-08-20"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        item = db_session.query(ActionItem).filter_by(
+            tenant_id=tenant_id, engagement_id=engagement.id,
+        ).one()
+        assert item.due_at is not None
+        assert item.due_at.date().isoformat() == "2026-08-20"
+
+    def test_manual_task_creates_open_item(self, ui_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        resp = ui_client.post(
+            f"/ui/engagements/{engagement.id}/actions/manual",
+            data={"assigned_to": "鈴木 花子", "task": "1on1で決めたタスク", "due_at": "2026-08-21"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+
+        item = db_session.query(ActionItem).filter_by(
+            tenant_id=tenant_id, engagement_id=engagement.id,
+        ).one()
+        assert item.field_path == "manual"
+        assert item.reason == "1on1で決めたタスク"
+        assert item.status == "open"
+
+    def test_manual_task_blank_fields_rejected(self, ui_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        resp = ui_client.post(
+            f"/ui/engagements/{engagement.id}/actions/manual",
+            data={"assigned_to": "  ", "task": "  "},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert "flash_type=error" in resp.headers["location"]
+        assert db_session.query(ActionItem).filter_by(
+            tenant_id=tenant_id, engagement_id=engagement.id,
+        ).count() == 0
+
 
 class TestSidebarNav:
     def test_active_page_gets_active_class(self, ui_client):

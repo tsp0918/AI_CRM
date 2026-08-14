@@ -21,8 +21,8 @@ from ...models import (
     QualificationSlot, Quote, SalesGroup, User, Waiver,
 )
 from ...services.action_items import (
-    assign_action_item, complete_action_item, dismiss_action_item,
-    list_open_action_items,
+    assign_action_item, complete_action_item, create_manual_action_item,
+    dismiss_action_item, list_open_action_items,
 )
 from ...services.activity_log import load_activity_log
 from ...services.confidence_score import compute_confidence_score, score_reasons
@@ -403,10 +403,17 @@ def verify_slot_ui(
 
 # --- 次の一手のタスク化 --------------------------------------------------------
 
+def _parse_due_at(raw: str) -> datetime | None:
+    if not raw.strip():
+        return None
+    return datetime.combine(date.fromisoformat(raw.strip()), datetime.min.time(), tzinfo=timezone.utc)
+
+
 @router.post("/ui/engagements/{engagement_id}/actions")
 def assign_next_best_action_ui(
     engagement_id: uuid.UUID,
     assigned_to: str = Form(...),
+    due_at: str = Form(""),
     ui_session: UiSession = Depends(require_ui_session),
     session: Session = Depends(get_ui_db_session),
 ) -> RedirectResponse:
@@ -434,11 +441,37 @@ def assign_next_best_action_ui(
     assign_action_item(
         session, ui_session.tenant_id, engagement.id, action,
         assigned_to=assigned_to.strip(), assigned_by=f"human:{ui_session.actor_id}",
+        due_at=_parse_due_at(due_at),
     )
     session.commit()
     return redirect_with_flash(
         f"/ui/engagements/{engagement_id}", f"{assigned_to.strip()} に次の一手をアサインしました",
     )
+
+
+@router.post("/ui/engagements/{engagement_id}/actions/manual")
+def create_manual_action_item_ui(
+    engagement_id: uuid.UUID,
+    assigned_to: str = Form(...),
+    task: str = Form(...),
+    due_at: str = Form(""),
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> RedirectResponse:
+    """1on1で決めた自由なタスクを追加する(ゲート判定を経由しない)。"""
+    _get_engagement_or_404(session, ui_session, engagement_id)
+    if not assigned_to.strip() or not task.strip():
+        return redirect_with_flash(
+            f"/ui/engagements/{engagement_id}", "担当者名とタスク内容を入力してください", "error",
+        )
+
+    create_manual_action_item(
+        session, ui_session.tenant_id, engagement_id,
+        assigned_to=assigned_to.strip(), task=task.strip(),
+        assigned_by=f"human:{ui_session.actor_id}", due_at=_parse_due_at(due_at),
+    )
+    session.commit()
+    return redirect_with_flash(f"/ui/engagements/{engagement_id}", "タスクを追加しました")
 
 
 def _get_action_or_404(

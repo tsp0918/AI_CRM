@@ -23,11 +23,29 @@ from .gate_engine import MissingItem
 def assign_action_item(
     session: Session, tenant_id: uuid.UUID, engagement_id: uuid.UUID,
     missing_item: MissingItem, *, assigned_to: str, assigned_by: str,
+    due_at: datetime | None = None,
 ) -> ActionItem:
     item = ActionItem(
         tenant_id=tenant_id, engagement_id=engagement_id,
         field_path=missing_item.field_path, reason=missing_item.reason,
         play=missing_item.play, assigned_to=assigned_to, written_by=assigned_by,
+        due_at=due_at,
+    )
+    session.add(item)
+    session.flush()
+    return item
+
+
+def create_manual_action_item(
+    session: Session, tenant_id: uuid.UUID, engagement_id: uuid.UUID, *,
+    assigned_to: str, task: str, assigned_by: str, due_at: datetime | None = None,
+) -> ActionItem:
+    """1on1で決めた自由なタスク用。ゲート判定を経由しない(field_path="manual"
+    で判別する)ため、reasonにタスク内容をそのまま入れる。"""
+    item = ActionItem(
+        tenant_id=tenant_id, engagement_id=engagement_id,
+        field_path="manual", reason=task, play=None,
+        assigned_to=assigned_to, written_by=assigned_by, due_at=due_at,
     )
     session.add(item)
     session.flush()
