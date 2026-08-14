@@ -11,10 +11,14 @@
 
 {% if assessments %}
 <div class="card">
-  <div style="display:flex; justify-content:space-between; align-items:baseline;">
+  <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px;">
     <span class="muted" style="font-size:13px;">重み付きリスク金額(担当者申告額 × 確度スコア)の合計</span>
-    <span style="font-size:20px; font-weight:800; font-family:ui-monospace,monospace;">
-      {{ "{:,.0f}".format(total_weighted) }} JPY
+    <span style="display:flex; gap:16px; flex-wrap:wrap;">
+      {% for currency, amount in total_weighted_by_currency %}
+      <span style="font-size:20px; font-weight:800; font-family:ui-monospace,monospace;">
+        {{ "{:,.0f}".format(amount) }} {{ currency }}
+      </span>
+      {% endfor %}
     </span>
   </div>
 </div>
@@ -32,7 +36,7 @@
     </div>
     <div style="display:flex; align-items:center; gap:14px;">
       {% if a.weighted_amount is not none %}
-      <span class="mono" style="font-size:13px; color:#374151;">重み付き {{ "{:,.0f}".format(a.weighted_amount) }} JPY</span>
+      <span class="mono" style="font-size:13px; color:#374151;">重み付き {{ "{:,.0f}".format(a.weighted_amount) }} {{ a.currency }}</span>
       {% endif %}
       <span class="score-badge score-badge-{{ a.score.band }}">{{ a.score.total }}</span>
     </div>

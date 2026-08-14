@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from ...enums import Stage
 from ...models import Account, Engagement, WeeklyReview
 from ...services.confidence_score import compute_confidence_score
+from ...services.engagement_relationships import list_renewal_candidates
 from ...services.stage_transitions import load_gate_context
 from ...services.users import list_users
 from ...services.weekly_review import week_start
@@ -90,6 +91,13 @@ def dashboard(
             "reviewed_this_week": e.id in reviewed_engagement_ids,
         })
 
+    # 更新未着手の警告(2026-08-14): list_renewal_candidates()は「更新商談が
+    # まだ無い」契約のみを返すため、ここに件数が出ている時点で「誰も
+    # 動いていない」ことが確定している。0日以内=期限超過を別カウントし
+    # 目立たせる(新しいフィルタUIは作らず、契約更新管理への導線のみ)。
+    unworked_renewals = list_renewal_candidates(session, ui_session.tenant_id, within_days=90)
+    overdue_renewals = [c for c in unworked_renewals if c.end_date <= date.today()]
+
     context = base_context(
         session, ui_session, active_nav="dashboard", request=request, flash=flash, flash_type=flash_type,
     )
@@ -98,5 +106,7 @@ def dashboard(
         "users": list_users(session, ui_session.tenant_id),
         "owner_user_id": owner_user_id,
         "show_closed": show_closed,
+        "unworked_renewal_count": len(unworked_renewals),
+        "overdue_renewal_count": len(overdue_renewals),
     })
     return templates.TemplateResponse(request, "dashboard.html", context)

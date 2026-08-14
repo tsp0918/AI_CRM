@@ -14,13 +14,16 @@ Quote/Contract と同じく明示的なサービス関数経由でのみ操作�
 from __future__ import annotations
 
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..enums import ContractStatus, EngagementRelationshipType, Stage
-from ..models import Account, Contract, Engagement
+from ..models import Account, Contract, Engagement, QualificationSlot
+from .decay_policy import compute_decays_at
+
+RENEWAL_CARRYOVER_ACTOR = "system:renewal-carryover"
 
 
 def create_child_engagement(
@@ -29,10 +32,14 @@ def create_child_engagement(
     owner: str | None = None,
 ) -> Engagement:
     """親案件(通常は closed_won の契約済み案件)と同じ取引先で、継続/Upsell/
-    Cross-sell の新しい商談を起こす。ステージは常に LEAD から開始する —
-    親の実績があっても予算・決裁者・タイミングは商談ごとに再確認するのが
-    このアプリのゲート設計と一貫するため(親のクオリフィケーション結果は
-    自動継承しない)。"""
+    Cross-sell の新しい商談を起こす。ステージは常に LEAD から開始する。
+
+    Upsell/Cross-sellは別商材の検討になるため、予算・決裁者・タイミングを
+    商談ごとに再確認する(親のクオリフィケーション結果は自動継承しない)。
+    一方Renewalは「同じ内容の契約を継続するだけ」であることが多いため、
+    2026-08-14: 親の直近のQualificationSlotを子に引き継ぐ(そのまま
+    通用するかはproposal/verifyで都度更新できる — あくまで初期値の
+    複製であり、証跡自体を丸ごと信頼済み扱いにするわけではない)。"""
     if not name.strip():
         raise ValueError("商談名を入力してください")
 
@@ -43,7 +50,31 @@ def create_child_engagement(
     )
     session.add(child)
     session.flush()
+
+    if relationship_type == EngagementRelationshipType.RENEWAL:
+        _carry_over_qualification_slots(session, tenant_id, parent, child)
+
     return child
+
+
+def _carry_over_qualification_slots(
+    session: Session, tenant_id: uuid.UUID, parent: Engagement, child: Engagement,
+) -> None:
+    parent_slots = session.execute(
+        select(QualificationSlot).where(
+            QualificationSlot.tenant_id == tenant_id,
+            QualificationSlot.engagement_id == parent.id,
+        )
+    ).scalars().all()
+    now = datetime.now(timezone.utc)
+    for slot in parent_slots:
+        session.add(QualificationSlot(
+            tenant_id=tenant_id, engagement_id=child.id, criterion=slot.criterion,
+            value=slot.value, confidence=slot.confidence,
+            asserted_at=now, decays_at=compute_decays_at(slot.criterion, now),
+            written_by=RENEWAL_CARRYOVER_ACTOR,
+        ))
+    session.flush()
 
 
 def list_child_engagements(

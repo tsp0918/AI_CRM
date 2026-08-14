@@ -9,8 +9,10 @@ ERPと契約IDで同期して実際の出荷・請求額が積算されるよう
 このレポートはコードの変更なしでそのまま正しい実売上を返すように
 設計してある(契約金額 → 実売上額への切替が自然に起きる)。
 
-複数通貨が混在するケースの換算は今回のスコープ外 — 現状のデモデータは
-全てJPYのため単純合算している。
+通貨換算は行わない(為替レートを持たないため)。各行は Engagement.currency
+を保持し、totals_by_currency() で通貨ごとに合計する — 複数通貨が混在する
+テナントでは合算せず、通貨ごとの内訳を返す(2026-08-14: 単一通貨=JPY
+という誤った前提でハードコードしていたのを修正)。
 """
 
 from __future__ import annotations
@@ -86,6 +88,7 @@ def closed_won_revenue_rows(session: Session, tenant_id: uuid.UUID) -> list[dict
         rows.append({
             "engagement": e,
             "amount": amount,
+            "currency": e.currency,
             "has_contract": e.id in has_contract,
             "account": account,
             "root_account": root_account,
@@ -93,6 +96,17 @@ def closed_won_revenue_rows(session: Session, tenant_id: uuid.UUID) -> list[dict
             "relationship_type": e.relationship_type or "new_business",
         })
     return rows
+
+
+def totals_by_currency(
+    rows: list[dict], amount_key: str = "amount",
+) -> list[tuple[str, Decimal]]:
+    """通貨ごとの合計を金額降順で返す。単一通貨のテナントなら要素数1件、
+    複数通貨が混在していれば通貨ごとに別々の行になる(為替換算はしない)。"""
+    totals: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+    for row in rows:
+        totals[row.get("currency") or "JPY"] += row[amount_key]
+    return sorted(totals.items(), key=lambda kv: kv[1], reverse=True)
 
 
 def _walk_to_root(
@@ -275,6 +289,7 @@ def _line_item_facts(
 
         facts.append({
             "engagement": engagement, "line_item": li, "amount": li.line_total,
+            "currency": engagement.currency,
             "product": product, "product_group": group,
             "account": account, "root_account": root_account,
             "sales_group": sales_group,

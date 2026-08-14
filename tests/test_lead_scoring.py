@@ -62,6 +62,15 @@ class TestPersonScore:
         score = compute_lead_score(make_lead(title="担当"), None, [], now=NOW)
         assert score.person_score == 0
 
+    def test_english_senior_titles_add_points(self):
+        for title in (
+            "Chief IP Counsel", "Head of Library and Information Services",
+            "Director of Technology Transfer", "VP Research & Development",
+            "Executive Director",
+        ):
+            score = compute_lead_score(make_lead(title=title), None, [], now=NOW)
+            assert score.person_score == 30, f"{title} should score 30, got {score.person_score}"
+
     def test_old_touches_outside_window_do_not_count(self):
         old_touch = make_touch(TouchChannel.CALL_CONNECTED, days_ago=200)
         score = compute_lead_score(make_lead(), None, [old_touch], now=NOW)

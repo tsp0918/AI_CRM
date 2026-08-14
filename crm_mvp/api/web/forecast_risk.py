@@ -6,8 +6,6 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
-
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
@@ -15,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from ...models import Account
 from ...services.forecast_risk import assess_forecast_risk
+from ...services.revenue_report import totals_by_currency
 from .common import base_context
 from .session import UiSession, get_ui_db_session, require_ui_session
 from .templates import templates
@@ -39,15 +38,16 @@ def forecast_risk_page(
             ).scalars()
         }
 
-    total_weighted = sum(
-        (a.weighted_amount for a in assessments if a.weighted_amount is not None),
-        Decimal("0"),
-    )
+    weighted_rows = [
+        {"currency": a.currency, "amount": a.weighted_amount}
+        for a in assessments if a.weighted_amount is not None
+    ]
+    total_weighted_by_currency = totals_by_currency(weighted_rows)
 
     context = base_context(session, ui_session, active_nav="forecast_risk", request=request)
     context.update({
         "assessments": assessments,
         "accounts": accounts,
-        "total_weighted": total_weighted,
+        "total_weighted_by_currency": total_weighted_by_currency,
     })
     return templates.TemplateResponse(request, "forecast_risk.html", context)

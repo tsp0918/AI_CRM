@@ -16,7 +16,6 @@
 from __future__ import annotations
 
 import uuid
-from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
@@ -27,7 +26,7 @@ from ...services.revenue_report import (
     RELATIONSHIP_TYPE_REPORT_LABELS, STAGE_REPORT_LABELS, aggregate_by,
     all_stage_line_item_facts, build_dimensions, closed_won_revenue_rows,
     facts_by_engagement, filter_facts, line_item_facts, pivot,
-    product_group_revenue,
+    product_group_revenue, totals_by_currency,
 )
 from ...services.sales_groups import list_sales_groups
 from ...services.users import list_users
@@ -53,7 +52,7 @@ def revenue_report_page(
 ) -> HTMLResponse:
     rows = closed_won_revenue_rows(session, ui_session.tenant_id)
 
-    total_revenue = sum((r["amount"] for r in rows), Decimal("0"))
+    total_revenue_by_currency = totals_by_currency(rows)
 
     by_account = aggregate_by(
         rows, lambda r: r["root_account"].name if r["root_account"] else "—",
@@ -74,7 +73,7 @@ def revenue_report_page(
 
     context = base_context(session, ui_session, active_nav="revenue_report", request=request)
     context.update({
-        "total_revenue": total_revenue, "deal_count": len(rows),
+        "total_revenue_by_currency": total_revenue_by_currency, "deal_count": len(rows),
         "by_account": by_account, "by_sales_group": by_sales_group,
         "by_relationship": by_relationship, "by_product_group": by_product_group,
     })
@@ -98,7 +97,7 @@ def revenue_drilldown_page(
         relationship_type=relationship_type or None,
     )
 
-    total_revenue = sum((f["amount"] for f in filtered), Decimal("0"))
+    total_revenue_by_currency = totals_by_currency(filtered)
     by_product = aggregate_by(
         filtered, lambda f: f["product"].name if f["product"] else "未分類",
     )
@@ -119,7 +118,7 @@ def revenue_drilldown_page(
 
     context = base_context(session, ui_session, active_nav="revenue_report", request=request)
     context.update({
-        "filter_labels": filter_labels, "total_revenue": total_revenue,
+        "filter_labels": filter_labels, "total_revenue_by_currency": total_revenue_by_currency,
         "by_product": by_product, "deals": deals,
     })
     return templates.TemplateResponse(request, "revenue_drilldown.html", context)
@@ -174,7 +173,7 @@ def report_builder_page(
         "relationship_type_choices": list(RELATIONSHIP_TYPE_REPORT_LABELS.items()),
         "stage_choices": list(STAGE_REPORT_LABELS.items()),
         "is_pivot": col_dim is not None,
-        "total_amount": sum((f["amount"] for f in filtered), Decimal("0")),
+        "total_amount_by_currency": totals_by_currency(filtered),
         "deal_count": len(filtered),
         **result,
     })

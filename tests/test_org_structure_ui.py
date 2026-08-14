@@ -202,6 +202,47 @@ class TestRevenueReportUi:
         resp = ui_client.get("/ui/reports/revenue")
         assert resp.status_code == 200
 
+    def test_report_shows_actual_currency_not_hardcoded_jpy(self, ui_client, db_session, tenant_id):
+        _, eng = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
+        product = Product(
+            tenant_id=tenant_id, name="テスト商品", list_price=Decimal("100000"), currency="USD",
+        )
+        db_session.add(product)
+        db_session.flush()
+        add_line_item(db_session, tenant_id, eng, product=product, quantity=1, discount_rate=Decimal("0"))
+        eng.currency = "USD"
+        db_session.commit()
+
+        resp = ui_client.get("/ui/reports/revenue")
+        assert resp.status_code == 200
+        assert "100,000 USD" in resp.text
+        assert "JPY" not in resp.text
+
+    def test_report_shows_separate_totals_for_mixed_currencies(self, ui_client, db_session, tenant_id):
+        _, eng_usd = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
+        eng_usd.currency = "USD"
+        product_usd = Product(
+            tenant_id=tenant_id, name="USD商品", list_price=Decimal("100000"), currency="USD",
+        )
+        db_session.add(product_usd)
+        db_session.flush()
+        add_line_item(db_session, tenant_id, eng_usd, product=product_usd, quantity=1, discount_rate=Decimal("0"))
+
+        _, eng_jpy = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
+        product_jpy = Product(
+            tenant_id=tenant_id, name="JPY商品", list_price=Decimal("50000"), currency="JPY",
+        )
+        db_session.add(product_jpy)
+        db_session.flush()
+        add_line_item(db_session, tenant_id, eng_jpy, product=product_jpy, quantity=1, discount_rate=Decimal("0"))
+        db_session.commit()
+
+        resp = ui_client.get("/ui/reports/revenue")
+        assert resp.status_code == 200
+        assert "100,000 USD" in resp.text
+        assert "50,000 JPY" in resp.text
+        assert "複数の通貨が混在しています" in resp.text
+
     def test_report_links_to_drilldown_and_account(self, ui_client, db_session, tenant_id):
         account, eng = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
         product_group = db_session.query(SalesGroup).filter_by(tenant_id=tenant_id).first()

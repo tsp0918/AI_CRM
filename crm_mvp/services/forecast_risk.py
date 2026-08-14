@@ -46,6 +46,10 @@ class RiskAssessment:
             return None
         return self.engagement.amount * (Decimal(self.score.total) / 100)
 
+    @property
+    def currency(self) -> str:
+        return self.engagement.currency
+
 
 def _amount_top_quartile_threshold(engagements: list[Engagement]) -> float | None:
     amounts = sorted(float(e.amount) for e in engagements if e.amount is not None)

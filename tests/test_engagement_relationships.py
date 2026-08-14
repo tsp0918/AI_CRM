@@ -50,6 +50,57 @@ class TestCreateChildEngagement:
                 relationship_type=EngagementRelationshipType.UPSELL, name="  ",
             )
 
+    def test_renewal_carries_over_parent_qualification_slots(self, db_session, tenant_id):
+        from crm_mvp.enums import Confidence, Criterion
+        from crm_mvp.models import QualificationSlot
+
+        _, parent = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
+        db_session.add(QualificationSlot(
+            tenant_id=tenant_id, engagement_id=parent.id, criterion=Criterion.BUDGET,
+            value={"amount": 24000, "fiscal_period": "FY2026"}, confidence=Confidence.VERIFIED,
+            written_by="human:tester",
+        ))
+        db_session.flush()
+
+        child = er.create_child_engagement(
+            db_session, tenant_id, parent,
+            relationship_type=EngagementRelationshipType.RENEWAL, name="更新商談",
+        )
+        db_session.commit()
+
+        child_slots = db_session.query(QualificationSlot).filter_by(
+            tenant_id=tenant_id, engagement_id=child.id,
+        ).all()
+        assert len(child_slots) == 1
+        slot = child_slots[0]
+        assert slot.criterion == Criterion.BUDGET
+        assert slot.value == {"amount": 24000, "fiscal_period": "FY2026"}
+        assert slot.confidence == Confidence.VERIFIED
+        assert slot.written_by == "system:renewal-carryover"
+        assert slot.decays_at is not None
+
+    def test_upsell_does_not_carry_over_qualification_slots(self, db_session, tenant_id):
+        from crm_mvp.enums import Confidence, Criterion
+        from crm_mvp.models import QualificationSlot
+
+        _, parent = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
+        db_session.add(QualificationSlot(
+            tenant_id=tenant_id, engagement_id=parent.id, criterion=Criterion.BUDGET,
+            value={"amount": 24000}, confidence=Confidence.VERIFIED, written_by="human:tester",
+        ))
+        db_session.flush()
+
+        child = er.create_child_engagement(
+            db_session, tenant_id, parent,
+            relationship_type=EngagementRelationshipType.UPSELL, name="Upsell商談",
+        )
+        db_session.commit()
+
+        child_slots = db_session.query(QualificationSlot).filter_by(
+            tenant_id=tenant_id, engagement_id=child.id,
+        ).all()
+        assert child_slots == []
+
 
 class TestListChildEngagements:
     def test_scoped_to_parent(self, db_session, tenant_id):

@@ -32,8 +32,14 @@ HIGH_INTENT_CHANNELS: frozenset[TouchChannel] = frozenset({
 })
 
 SENIOR_TITLE_KEYWORDS: tuple[str, ...] = (
+    # 日本語の役職語彙
     "社長", "取締役", "本部長", "工場長", "部長", "課長", "室長",
     "マネージャー", "リーダー", "CEO", "COO", "CTO", "CFO",
+    # 英語の役職語彙(2026-08-14: 製造業の役職語彙に偏っており、海外拠点・
+    # 研究機関・大学等の役職者が拾えていなかったため追加)。
+    "Chief", "President", "Vice President", "VP", "Director",
+    "Head of", "Officer", "Dean", "Provost", "Executive",
+    "Principal", "Manager", "Lead",
 )
 
 

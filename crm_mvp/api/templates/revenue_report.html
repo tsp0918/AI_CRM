@@ -11,9 +11,18 @@
 
 <div class="card">
   <h2>累計実売上</h2>
-  <div style="font-size:32px; font-weight:800; font-family:ui-monospace,monospace;">
-    {{ "{:,.0f}".format(total_revenue) }} JPY
+  <div style="display:flex; gap:24px; flex-wrap:wrap;">
+    {% for currency, amount in total_revenue_by_currency %}
+    <div style="font-size:32px; font-weight:800; font-family:ui-monospace,monospace;">
+      {{ "{:,.0f}".format(amount) }} {{ currency }}
+    </div>
+    {% else %}
+    <div style="font-size:32px; font-weight:800; font-family:ui-monospace,monospace;">0</div>
+    {% endfor %}
   </div>
+  {% if total_revenue_by_currency | length > 1 %}
+  <p class="subtitle" style="margin-top:4px; color:#a3711a;">複数の通貨が混在しています(為替換算はしていません)。</p>
+  {% endif %}
   <p class="subtitle" style="margin-top:4px;">受注商談 {{ deal_count }}件</p>
 </div>
 

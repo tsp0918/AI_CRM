@@ -86,6 +86,42 @@ class TestClosedWonRevenueRows:
         rows = rr.closed_won_revenue_rows(db_session, tenant_id)
         assert rows[0]["relationship_type"] == "new_business"
 
+    def test_row_includes_engagement_currency(self, db_session, tenant_id):
+        _, eng = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
+        eng.currency = "USD"
+        db_session.commit()
+
+        rows = rr.closed_won_revenue_rows(db_session, tenant_id)
+        assert rows[0]["currency"] == "USD"
+
+
+class TestTotalsByCurrency:
+    def test_single_currency_sums_to_one_entry(self):
+        rows = [
+            {"amount": Decimal("100"), "currency": "USD"},
+            {"amount": Decimal("50"), "currency": "USD"},
+        ]
+        result = rr.totals_by_currency(rows)
+        assert result == [("USD", Decimal("150"))]
+
+    def test_mixed_currencies_kept_separate_not_summed_together(self):
+        rows = [
+            {"amount": Decimal("100"), "currency": "USD"},
+            {"amount": Decimal("200000"), "currency": "JPY"},
+            {"amount": Decimal("50"), "currency": "USD"},
+        ]
+        result = rr.totals_by_currency(rows)
+        by_currency = dict(result)
+        assert by_currency["USD"] == Decimal("150")
+        assert by_currency["JPY"] == Decimal("200000")
+        # 金額降順(この場合はJPYの200000が先頭)
+        assert result[0][0] == "JPY"
+
+    def test_missing_currency_falls_back_to_jpy(self):
+        rows = [{"amount": Decimal("10")}]
+        result = rr.totals_by_currency(rows)
+        assert result == [("JPY", Decimal("10"))]
+
 
 class TestAggregateBy:
     def test_groups_and_sums(self):

@@ -15,8 +15,14 @@
 
 <div class="card">
   <h2>該当する実売上</h2>
-  <div style="font-size:28px; font-weight:800; font-family:ui-monospace,monospace;">
-    {{ "{:,.0f}".format(total_revenue) }} JPY
+  <div style="display:flex; gap:20px; flex-wrap:wrap;">
+    {% for currency, amount in total_revenue_by_currency %}
+    <div style="font-size:28px; font-weight:800; font-family:ui-monospace,monospace;">
+      {{ "{:,.0f}".format(amount) }} {{ currency }}
+    </div>
+    {% else %}
+    <div style="font-size:28px; font-weight:800; font-family:ui-monospace,monospace;">0</div>
+    {% endfor %}
   </div>
 </div>
 

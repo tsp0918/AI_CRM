@@ -118,3 +118,13 @@ class TestAssessForecastRisk:
 
         assessments = assess_forecast_risk(db_session, tenant_id, today=TODAY)
         assert [a.engagement.id for a in assessments] == [big.id, small.id]
+
+    def test_currency_reflects_engagement_currency_not_hardcoded_jpy(self, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id, Stage.NEGOTIATION)
+        engagement.expected_close_date = TODAY + timedelta(days=5)
+        engagement.amount = Decimal("1000000")
+        engagement.currency = "USD"
+        db_session.flush()
+
+        assessments = assess_forecast_risk(db_session, tenant_id, today=TODAY)
+        assert assessments[0].currency == "USD"

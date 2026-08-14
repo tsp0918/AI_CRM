@@ -145,6 +145,59 @@ class TestDashboard:
         assert "Bの案件" not in main
 
 
+class TestDashboardRenewalWarning:
+    def test_no_warning_when_no_unworked_renewals(self, ui_client, db_session, tenant_id):
+        resp = ui_client.get("/ui/")
+        assert resp.status_code == 200
+        assert "更新未着手の契約が" not in resp.text
+
+    def test_warning_shows_overdue_unworked_renewal(self, ui_client, db_session, tenant_id):
+        from datetime import date, timedelta
+        from decimal import Decimal
+
+        from crm_mvp.enums import ContractStatus, Stage
+        from crm_mvp.models import Contract
+
+        _, eng = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
+        contract = Contract(
+            tenant_id=tenant_id, engagement_id=eng.id, contract_number="C-TEST-0001",
+            status=ContractStatus.ACTIVE, total_amount=Decimal("1000000"), currency="JPY",
+            end_date=date.today() - timedelta(days=10), written_by="human:tester",
+        )
+        db_session.add(contract)
+        db_session.commit()
+
+        resp = ui_client.get("/ui/")
+        assert resp.status_code == 200
+        assert "更新未着手の契約が" in resp.text
+        assert "1件は期限超過" in resp.text
+
+    def test_no_warning_once_renewal_engagement_exists(self, ui_client, db_session, tenant_id):
+        from datetime import date, timedelta
+        from decimal import Decimal
+
+        from crm_mvp.enums import ContractStatus, EngagementRelationshipType, Stage
+        from crm_mvp.models import Contract
+        from crm_mvp.services.engagement_relationships import create_child_engagement
+
+        _, eng = create_account_and_engagement(db_session, tenant_id, stage=Stage.CLOSED_WON)
+        contract = Contract(
+            tenant_id=tenant_id, engagement_id=eng.id, contract_number="C-TEST-0001",
+            status=ContractStatus.ACTIVE, total_amount=Decimal("1000000"), currency="JPY",
+            end_date=date.today() - timedelta(days=10), written_by="human:tester",
+        )
+        db_session.add(contract)
+        create_child_engagement(
+            db_session, tenant_id, eng, relationship_type=EngagementRelationshipType.RENEWAL,
+            name="更新交渉",
+        )
+        db_session.commit()
+
+        resp = ui_client.get("/ui/")
+        assert resp.status_code == 200
+        assert "更新未着手の契約が" not in resp.text
+
+
 class TestDashboardReviewBadge:
     def test_no_review_shows_unreviewed_badge(self, ui_client, db_session, tenant_id):
         create_account_and_engagement(db_session, tenant_id)

@@ -6,6 +6,16 @@
 <h1>ダッシュボード</h1>
 <p class="subtitle">{{ rows | length }} 件の案件{% if not show_closed %}(進行中のみ表示中){% endif %}</p>
 
+{% if unworked_renewal_count %}
+<div class="card" style="border-color:#a3711a; background:#f4ead4; margin-bottom:16px;">
+  <p style="margin:0; color:#5b4310;">
+    更新未着手の契約が <strong>{{ unworked_renewal_count }}件</strong>あります
+    {% if overdue_renewal_count %}(うち<strong>{{ overdue_renewal_count }}件は期限超過</strong>){% endif %}。
+    <a href="/ui/renewals" style="color:#a3711a; text-decoration:underline;">契約更新管理を見る &rarr;</a>
+  </p>
+</div>
+{% endif %}
+
 <form method="get" action="/ui/" class="field-row filter-bar" style="max-width:520px; margin-bottom:16px;">
   <div>
     <label for="owner_user_id">担当者</label>
