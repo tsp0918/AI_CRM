@@ -33,8 +33,13 @@ from ...services.engagement_relationships import (
 )
 from ...services.account_hierarchy import list_accounts
 from ...services.artifact_gate import evaluate_artifact_gate
+from ...services.commerce_check import submit_commerce_check
 from ...services.compliance_screening import ensure_account_screened
-from ...services.party_compliance import check_party_clearance, worst_compliance_outcome
+from ...services.erp_transcription import submit_contract_transcription
+from ...services.fulfillment import compute_fulfillment_summary
+from ...services.party_compliance import (
+    check_commerce_clearance, check_party_clearance, worst_compliance_outcome,
+)
 from ...services.pricing import add_line_item, list_line_items, remove_line_item
 from ...services.review_case import (
     check_review_clearance, submit_formal_review, submit_provisional_review,
@@ -262,6 +267,12 @@ def engagement_detail(
         ).scalars()
     } if contracts else {}
 
+    # 実績3層サマリー(Phase 3, §7.6)。ERP転記済み(external_id有り)の
+    # 契約のみ意味があるが、未転記でも0件のサマリーを返すだけなので無条件で計算する。
+    fulfillment_by_contract = {
+        c.id: compute_fulfillment_summary(session, ui_session.tenant_id, c) for c in contracts
+    }
+
     # 取引先・エンドユーザーのコンプライアンス状態(Phase 2a)。
     # 見積・契約に紐づくend_user_account_idごとに1回だけ問い合わせる。
     end_user_ids = {
@@ -322,6 +333,7 @@ def engagement_detail(
         "review_cases_by_quote": review_cases_by_quote,
         "contracts": contracts, "contract_line_items": contract_line_items,
         "review_cases_by_contract": review_cases_by_contract,
+        "fulfillment_by_contract": fulfillment_by_contract,
         "compliance_by_account_id": compliance_by_account_id,
         "end_user_candidates": end_user_candidates,
         "accounts_by_id": accounts_by_id,
@@ -761,6 +773,12 @@ def create_quote_ui(
         session, ui_session.tenant_id, quote, engagement,
         actor=f"human:{ui_session.actor_id}",
     )
+    # §6.8: 見積をDRAFTで作成したタイミングでERPの商流ゲート(与信・反社)
+    # へも送信する(AI_TM側の輸出審査とは独立した非同期送信)。
+    submit_commerce_check(
+        session, ui_session.tenant_id, quote, engagement,
+        actor=f"human:{ui_session.actor_id}",
+    )
 
     session.commit()
     return redirect_with_flash(
@@ -792,6 +810,11 @@ def update_quote_status_ui(
         block_reason = check_review_clearance(
             session, ui_session.tenant_id, quote_id=quote.id,
         )
+        if block_reason is None:
+            engagement = _get_engagement_or_404(session, ui_session, engagement_id)
+            block_reason = check_commerce_clearance(
+                session, ui_session.tenant_id, account_id=engagement.account_id,
+            )
         if block_reason is not None:
             return redirect_with_flash(
                 f"/ui/engagements/{engagement_id}", block_reason, "error",
@@ -883,17 +906,33 @@ def update_contract_status_ui(
         raise HTTPException(status_code=404, detail="contract not found")
 
     new_status = ContractStatus(status)
+    engagement = _get_engagement_or_404(session, ui_session, engagement_id)
 
     if new_status in (ContractStatus.SIGNED, ContractStatus.ACTIVE):
         block_reason = check_review_clearance(
             session, ui_session.tenant_id, contract_id=contract.id,
         )
+        if block_reason is None:
+            block_reason = check_commerce_clearance(
+                session, ui_session.tenant_id, account_id=engagement.account_id,
+            )
         if block_reason is not None:
             return redirect_with_flash(
                 f"/ui/engagements/{engagement_id}", block_reason, "error",
             )
 
+    was_signed = contract.status == ContractStatus.SIGNED
     update_contract_status(contract, new_status)
+
+    # §6.9: 締結(SIGNED)のタイミングでERPへ受注転記する。既にexternal_id
+    # が設定済み(=転記済み)なら再送しない(この画面からの再送信は
+    # ステータスを一旦戻して選び直すという操作自体が起きない前提)。
+    if new_status == ContractStatus.SIGNED and not was_signed and not contract.external_id:
+        submit_contract_transcription(
+            session, ui_session.tenant_id, contract, engagement,
+            actor=f"human:{ui_session.actor_id}",
+        )
+
     session.commit()
     return redirect_with_flash(f"/ui/engagements/{engagement_id}", f"契約を「{status}」にしました")
 

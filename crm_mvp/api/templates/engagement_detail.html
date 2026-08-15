@@ -429,6 +429,14 @@
       </tbody>
     </table>
     {% endif %}
+    {% set fulfillment = fulfillment_by_contract.get(c.id) %}
+    {% if fulfillment and fulfillment.events %}
+    <div class="subtitle" style="margin-top:8px; font-size:12px;">
+      実績3層(ERP連携): 受注残 {{ "{:,.0f}".format(fulfillment.backlog) }} /
+      未請求残 {{ "{:,.0f}".format(fulfillment.unbilled) }} /
+      消化率 {{ "%.0f"|format(fulfillment.fulfillment_rate * 100) if fulfillment.fulfillment_rate is not none else "—" }}%
+    </div>
+    {% endif %}
     <form method="post" action="/ui/engagements/{{ engagement.id }}/contracts/{{ c.id }}/status" class="inline" style="margin-top:8px;">
       <select name="status">
         {% for s in contract_status_values %}

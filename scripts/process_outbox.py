@@ -25,6 +25,8 @@ import uuid
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
+from crm_mvp.services.commerce_check import register_erp_dispatchers
+from crm_mvp.services.erp_transcription import register_erp_transcription_dispatchers
 from crm_mvp.services.outbox import process_outbox
 from crm_mvp.services.review_case import register_aitm_dispatchers
 
@@ -51,6 +53,8 @@ def main() -> None:
     args = parser.parse_args()
 
     register_aitm_dispatchers()
+    register_erp_dispatchers()
+    register_erp_transcription_dispatchers()
     engine = create_engine(args.database_url)
 
     while True:

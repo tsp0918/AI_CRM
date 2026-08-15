@@ -17,6 +17,7 @@ from .weekly_review import WeeklyReview
 from .report_snapshot import ReportSnapshot
 from .integration import OutboxMessage, WebhookEvent
 from .review_case import ReviewCase
+from .fulfillment import ContractFulfillment
 
 __all__ = [
     "Account", "Contact", "ComplianceStatus",
@@ -34,4 +35,5 @@ __all__ = [
     "ReportSnapshot",
     "OutboxMessage", "WebhookEvent",
     "ReviewCase",
+    "ContractFulfillment",
 ]

@@ -13,7 +13,7 @@ from urllib.parse import quote
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 
-from . import accounts, engagements, proposals, sources, web, webhooks
+from . import accounts, engagements, erp_webhooks, proposals, sources, web, webhooks
 from .web.session import WorkspaceRequired
 
 
@@ -24,6 +24,7 @@ def create_app() -> FastAPI:
     app.include_router(engagements.router)
     app.include_router(accounts.router)
     app.include_router(webhooks.router)
+    app.include_router(erp_webhooks.router)
     app.include_router(web.router)
 
     @app.exception_handler(WorkspaceRequired)

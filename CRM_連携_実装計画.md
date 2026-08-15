@@ -145,11 +145,20 @@ Phase 1へ意図的に先送り(コンシューマ不在のため)。C0-4はス�
 
 ### Phase 3 — ERP連携
 
+**進捗(2026-08-15): コア部分(C3-1/C3-2/C3-3/C3-4/C3-5/C3-6/C3-7/C3-8)実装済み。
+全テストgreen(631件、新規テストは今回未作成 — Phase 2remainder以降と同じ
+方針)。ダミー実装のERP側と同じ「同期レスポンス」契約を前提に組んでいる
+ため、実ERPのAPI契約が固まった時点で`crm_mvp/services/commerce_check.py`/
+`erp_transcription.py`のペイロード形状を再確認すること。**
+
 | ID | 追加注記 |
 |---|---|
-| C3-1 | §2.1-2の通り、レスポンスの`counterparty_attributes`を`Account`に反映する処理を中心に実装。送信先IDは`external_id`から解決 |
-| C3-3 | IF-25送信時、`Contract.external_system="erp"`が既に設定されている(=ERP登録済み取引先からの契約)場合と、未設定(=CRM発生の新規取引先)の場合で分岐が必要 — この分岐は引き継ぎ書のペイロード例(`counterparty`欄をERP新規作成用に使う分岐)と整合 |
-| C3-6 | 優先度分割を推奨: (a)`realized_amount`更新のみ(既存レポート即対応) → (b)`ContractFulfillment`による内訳・受注残の追加、の2段階に分けて価値を早期に出す |
+| C3-1/C3-2 | §2.1-2の通り、レスポンスの`counterparty_attributes`を`Account`に反映する処理を中心に実装。**[完了]** `crm_mvp/services/commerce_check.py`。IF-32は同期レスポンス型のため、Outbox dispatcherがその場で`ComplianceStatus`(CREDIT/ANTI_SOCIAL)と`Account.credit_limit`等を更新する — 別途受信Webhookは不要と判断した。`ng`は新設の`check_commerce_clearance()`(`party_compliance.py`)で見積送付・契約締結をハード遮断する(既存の`check_review_clearance`と並列で`update_quote_status_ui`/`update_contract_status_ui`に配線) |
+| C3-3 | IF-25送信時、`Contract.external_system="erp"`が既に設定されている(=ERP登録済み取引先からの契約)場合と、未設定(=CRM発生の新規取引先)の場合で分岐が必要。**[完了]** `crm_mvp/services/erp_transcription.py`。`aitm_transaction_id`(§6.9最重要)は正式審査`ReviewCase.provider_request_id`から取得して必ず引き渡す。契約`SIGNED`遷移時に自動起票、レスポンスの`document_number`を`Contract.external_id`に保存(以後IF-29/30/31が逆引きするキーになる) |
+| C3-4/C3-5 | IF-26/IF-27(品目・取引先マスタ受信)。**[完了]** 新規`crm_mvp/api/erp_webhooks.py`(`/webhooks/erp/material-updated`・`/business-partner-updated`)。CSV取込スクリプトが使っている`upsert_erp_material`/`upsert_erp_business_partner`をそのまま1件ずつ呼ぶ薄いラッパーとして実装 — 取込ロジックの二重実装を避けた |
+| C3-6/C3-7 | 優先度分割を推奨: (a)`realized_amount`更新のみ(既存レポート即対応) → (b)`ContractFulfillment`による内訳・受注残の追加、の2段階に分けて価値を早期に出す。**[両方完了]** 新規`ContractFulfillment`モデル(`crm_mvp/models/fulfillment.py`)+`crm_mvp/services/fulfillment.py`。`/webhooks/erp/delivery-posted`・`billing-posted`・`return-posted`(`erp_webhooks.py`)が受信し、`recalculate_actuals()`が`Contract.realized_amount`(既存フィールド、`revenue_report.py`が優先使用)を都度再計算する。冪等性は`(tenant_id, kind, erp_document_number)`のユニーク制約で担保 |
+| C3-8 | 契約詳細の実績3層UI・時系列分析。**[最小限完了]** `engagement_detail.html`の契約カードに受注残・未請求残・消化率の1行サマリーを追加。時系列分析(グラフ等)は未着手 |
+| C3-9 | IF-28与信枠照会(見積時のリアルタイム参照)。**[未着手]** C3-1のレスポンス反映で`Account.credit_limit`/`credit_available`は既に見積作成の都度更新されるため、別途の同期照会エンドポイントは優先度を下げた |
 
 ### Phase 4 — ライセンス・R&D・みなし輸出
 

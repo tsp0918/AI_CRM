@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
+from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy import (
+    Date, DateTime, ForeignKey, Index, Numeric, String, UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -34,6 +37,14 @@ class Account(Base, UUIDPk, Timestamped, TenantScoped):
     # (CRM_連携引き継ぎ書.md §5.1)。一度でも送出・受領した後はこれを
     # 優先して以降のリクエストに使い、名寄せ処理をスキップできる。
     aitm_party_id: Mapped[str | None] = mapped_column(String(64), index=True)
+
+    # ERPの商流ゲート(IF-32与信・反社チェック)応答から反映される、ERPが
+    # 正とする取引先属性(参照専用、CRM側からは書き換えない §6.8)。
+    credit_limit: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    credit_available: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    payment_terms_master: Mapped[str | None] = mapped_column(String(32))
+    customer_group: Mapped[str | None] = mapped_column(String(64))
+    sales_district: Mapped[str | None] = mapped_column(String(64))
 
     # 法人グループのロールアップ(親会社/子会社)。Engagement.parent_engagement_id
     # と同じ自己参照パターン。子会社Accountが削除されても履歴は残したいため

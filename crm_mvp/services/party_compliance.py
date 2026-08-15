@@ -19,7 +19,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..enums import ComplianceOutcome
+from ..enums import ComplianceCheckType, ComplianceOutcome
 from ..models import Account, ComplianceStatus
 
 # 表示用の重大度順(重大 -> 軽微)。ブロック判定にはHITのみ使うが、UIバッジは
@@ -75,6 +75,29 @@ def check_party_clearance(
             return f"エンドユーザー「{name}」が制裁対象(HIT)のため、見積・契約を作成できません"
 
     return None
+
+
+_COMMERCE_CHECK_TYPES = (ComplianceCheckType.CREDIT, ComplianceCheckType.ANTI_SOCIAL)
+
+
+def check_commerce_clearance(session: Session, tenant_id: uuid.UUID, *, account_id: uuid.UUID) -> str | None:
+    """ERP商流ゲート(IF-32、§6.8/§8.1)の`ng`(=`ComplianceOutcome.BLOCKED`)を
+    見積送付・契約締結のハード遮断として扱う。`check_party_clearance`が見る
+    HIT(制裁)とは意味が異なる別種の懸念のため、独立した関数にする。
+    """
+    status = session.execute(
+        select(ComplianceStatus).where(
+            ComplianceStatus.tenant_id == tenant_id,
+            ComplianceStatus.account_id == account_id,
+            ComplianceStatus.check_type.in_(_COMMERCE_CHECK_TYPES),
+            ComplianceStatus.outcome == ComplianceOutcome.BLOCKED,
+        )
+    ).scalars().first()
+    if status is None:
+        return None
+    account = session.get(Account, account_id)
+    name = account.name if account else str(account_id)
+    return f"取引先「{name}」の商流ゲート(与信・反社)がNGのため、見積送付・契約締結できません"
 
 
 def build_party_ref(account: Account) -> dict:
