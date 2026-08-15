@@ -21,7 +21,9 @@ from sqlalchemy.orm import Session
 
 from ..enums import ContractStatus, EngagementRelationshipType, Stage
 from ..models import Account, Contract, Engagement, QualificationSlot
+from .compliance_screening import ensure_account_screened
 from .decay_policy import compute_decays_at
+from .party_compliance import check_party_clearance
 
 RENEWAL_CARRYOVER_ACTOR = "system:renewal-carryover"
 
@@ -42,6 +44,13 @@ def create_child_engagement(
     複製であり、証跡自体を丸ごと信頼済み扱いにするわけではない)。"""
     if not name.strip():
         raise ValueError("商談名を入力してください")
+
+    account = session.get(Account, parent.account_id)
+    if account is not None:
+        ensure_account_screened(session, tenant_id, account)
+        party_block_reason = check_party_clearance(session, tenant_id, account_id=account.id)
+        if party_block_reason is not None:
+            raise ValueError(party_block_reason)
 
     child = Engagement(
         tenant_id=tenant_id, account_id=parent.account_id, name=name.strip(),

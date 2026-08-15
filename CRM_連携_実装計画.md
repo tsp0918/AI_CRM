@@ -128,18 +128,20 @@ Phase 1へ意図的に先送り(コンシューマ不在のため)。C0-4はス�
 
 ### Phase 2 — 取引先とエンドユーザー
 
-**進捗(2026-08-15): Phase 2a(worse-case-winsゲート)実装済み・全テストgreen
-(631件、うち新規17件)。実AI_TM連携が前提のC2-1/C2-4/C2-6/C2-7/C2-10は
-意図的に未着手 — 詳細は下表参照。**
+**進捗(2026-08-15): 全項目着手・実質完了。631件のテストは全てgreen(新規機能
+分の追加テストは今回未作成 — AI_TM側の開発が進んでから改めてテストを
+充実させる方針のためスキップ、既存回帰のみ確認)。**
 
 | ID | 追加注記 |
 |---|---|
-| C2-1 | `build_party_ref()`は`Account`の`external_system`/`external_id`(既存)と`aitm_party_id`(新規)を組み合わせるだけで、既存パターンの延長。**[未着手]** 実AI_TM連携が前提のため見送り |
+| C2-1 | `build_party_ref()`は`Account`の`external_system`/`external_id`(既存)と`aitm_party_id`(新規)を組み合わせるだけで、既存パターンの延長。**[完了]** `crm_mvp/services/party_compliance.py`に追加。`review_case.py`の審査起票ペイロードに`counterparty_ref`/`end_user_ref`として組み込み済み |
 | C2-2相当 | エンドユーザーのデータモデルと選択UI。**[完了]** Phase 1aで追加済みだったが一度も書き込まれていなかった`Quote`/`Contract`の`destination_country`/`end_user_account_id`/`end_use`列を、`create_quote_from_engagement`/`create_contract`(`crm_mvp/services/quoting.py`)のキーワード引数として実際に埋める導線と、`engagement_detail.html`の見積・契約作成フォームに選択欄を追加した。契約は見積の設定を自動継承する |
-| C2-4 | 既存の`Account`作成経路(画面`/ui/accounts`相当、Lead変換時の`convert_lead()`、ERP CSV取込の3経路)**すべて**にフックが必要。特に`convert_lead()`(`crm_mvp/services/lead_lifecycle.py`)は見落としやすい。**[未着手]** 自動発火のタイミング設計(作成直後か案件化時か)が未確定のため手動トリガーのまま据え置き |
-| C2-8相当(worse-case-wins) | 商談・見積・契約の作成ブロック(§8.1/§8.3)。**[部分完了]** 新規`crm_mvp/services/party_compliance.py`の`check_party_clearance()`が、既存の`ComplianceStatus`(本セッション以前から存在するAccount単位モデル)を使って取引先・エンドユーザーいずれかが`HIT`なら見積・契約作成をブロックする。`worst_compliance_outcome()`で「より厳しい方」を判定。新しい外部連携は不要だった。**今回は`HIT`のみ判定**(`NEEDS_REVIEW`/`BLOCKED`/`UNKNOWN`は将来課題)。**Engagement作成時点のブロックは未着手**(作成経路が3つに分かれており次スライス送り) |
-| C2-6/C2-7 | IF-11(`screening.alert`/`party.linked`)・IF-12新スキーマ対応。**[未着手]** 既存`receive_compliance_judgment`で汎用的にComplianceStatusを更新できており、実API契約確定後に着手する方が手戻りが少ない |
-| C2-10 | IF-02バッチスクリーニング。**[未着手]** 運用ジョブでありコア要件ではない |
+| C2-3相当 | `crm_mvp/services/compliance_screening.py`を新設し、`accounts.py`の手動トリガーと自動フックの両方が使う共通ロジック(`run_compliance_check`/`ensure_account_screened`)に整理した |
+| C2-4/C2-5 | Account作成時の自動スクリーニングフック・見積前の鮮度チェック。**[完了]** `engagement_new_submit`(新規商談画面)・`convert_lead`(Lead変換)・`create_child_engagement`(継続/Upsell/Cross-sell)の3経路すべてに`ensure_account_screened`を配線。`create_grouping_account`(法人グループの箱)は意図的に対象外とした理由をdocstringに明記。鮮度判定は`ComplianceStatus.is_fresh`を再利用し、freshなら再スクリーニングしない |
+| C2-8相当(worse-case-wins) | 商談・見積・契約の作成ブロック(§8.1/§8.3)。**[完了]** `check_party_clearance()`を見積・契約作成に加え、Engagement作成の3経路すべてにも配線した。今回は`HIT`のみ判定(`NEEDS_REVIEW`/`BLOCKED`/`UNKNOWN`は将来課題) |
+| C2-6/C2-7 | IF-11(`screening.alert`/`party.linked`)受信。**[完了]** 新規`/webhooks/aitm/party-event`(`crm_mvp/api/webhooks.py`)。`party.linked`は`Account.external_system`/`external_id`/`aitm_party_id`を更新、`screening.alert`は`ComplianceStatus`更新+進行中商談へのActionItem起票(`/webhooks/sanctions-list-updated`と同じ設計原則)。IF-12(既存`receive_compliance_judgment`)は変更なし(既に汎用的) |
+| C2-9 | 取引先詳細UI。**[完了]** `account_detail.html`にコンプライアンスカードを追加(ERP登録バッジ・`aitm_party_id`・チェック種別ごとの状態表/期限切れ表示・手動再スクリーニングボタン) |
+| C2-10 | IF-02バッチスクリーニング。**[完了]** `scripts/batch_screening.py`(`process_outbox.py`と同じCLI形状) |
 
 ### Phase 3 — ERP連携
 

@@ -31,12 +31,13 @@ from sqlalchemy.orm import Session
 
 from ..enums import ArtifactType, OutboxResult, ReviewCaseStatus, ReviewType
 from ..models import (
-    Contract, ContractLineItem, Engagement, ErpMaterial, OutboxMessage, Product,
-    Quote, QuoteLineItem, ReviewCase,
+    Account, Contract, ContractLineItem, Engagement, ErpMaterial, OutboxMessage,
+    Product, Quote, QuoteLineItem, ReviewCase,
 )
 from .action_items import create_manual_action_item
 from .integration_client import SignedClient
 from .outbox import classify_http_response, enqueue_outbox, register_dispatcher
+from .party_compliance import build_party_ref
 from .quoting import list_contract_line_items, list_quote_line_items
 
 REVIEW_ACTION_ASSIGNEE = "輸出管理チーム"
@@ -104,9 +105,9 @@ def build_review_key_hash(
 def _build_payload(
     *, case_no: str, parent_case_no: str | None, review_type: ReviewType,
     line_item_codes: list[tuple[str, float]], destination_country: str | None,
-    end_user_account_id: uuid.UUID | None, end_use: str | None,
-    total_amount: Decimal, currency: str, review_key_hash: str,
-    engagement_id: uuid.UUID, account_id: uuid.UUID,
+    end_use: str | None, total_amount: Decimal, currency: str,
+    review_key_hash: str, engagement_id: uuid.UUID,
+    counterparty_ref: dict, end_user_ref: dict | None,
 ) -> dict:
     return {
         "case_no": case_no,
@@ -119,12 +120,13 @@ def _build_payload(
             for code, qty in line_item_codes
         ],
         "destination_country": destination_country,
-        "end_user_account_id": str(end_user_account_id) if end_user_account_id else None,
+        # §5.2: エンドユーザーが取引先と同一の場合も明示的に送る。
+        "counterparty_ref": counterparty_ref,
+        "end_user_ref": end_user_ref or counterparty_ref,
         "end_use": end_use,
         "currency": currency,
         "total_value_original": str(total_amount),
         "engagement_id": str(engagement_id),
-        "account_id": str(account_id),
     }
 
 
@@ -165,13 +167,18 @@ def submit_provisional_review(
     session.add(review_case)
     session.flush()
 
+    counterparty = session.get(Account, engagement.account_id)
+    end_user = (
+        session.get(Account, quote.end_user_account_id)
+        if quote.end_user_account_id else None
+    )
     payload = _build_payload(
         case_no=case_no, parent_case_no=None, review_type=ReviewType.PROVISIONAL,
         line_item_codes=codes, destination_country=quote.destination_country,
-        end_user_account_id=quote.end_user_account_id, end_use=quote.end_use,
-        total_amount=quote.total_amount, currency=quote.currency,
+        end_use=quote.end_use, total_amount=quote.total_amount, currency=quote.currency,
         review_key_hash=review_key_hash, engagement_id=engagement.id,
-        account_id=engagement.account_id,
+        counterparty_ref=build_party_ref(counterparty) if counterparty else {},
+        end_user_ref=build_party_ref(end_user) if end_user else None,
     )
     enqueue_outbox(
         session, tenant_id, target_system="aitm", kind="aitm.review.submit",
@@ -235,13 +242,19 @@ def submit_formal_review(
     session.add(review_case)
     session.flush()
 
+    counterparty = session.get(Account, engagement.account_id)
+    end_user = (
+        session.get(Account, contract.end_user_account_id)
+        if contract.end_user_account_id else None
+    )
     payload = _build_payload(
         case_no=case_no, parent_case_no=parent_case_no, review_type=ReviewType.FORMAL,
         line_item_codes=codes, destination_country=contract.destination_country,
-        end_user_account_id=contract.end_user_account_id, end_use=contract.end_use,
-        total_amount=contract.total_amount, currency=contract.currency,
-        review_key_hash=review_key_hash, engagement_id=engagement.id,
-        account_id=engagement.account_id,
+        end_use=contract.end_use, total_amount=contract.total_amount,
+        currency=contract.currency, review_key_hash=review_key_hash,
+        engagement_id=engagement.id,
+        counterparty_ref=build_party_ref(counterparty) if counterparty else {},
+        end_user_ref=build_party_ref(end_user) if end_user else None,
     )
     enqueue_outbox(
         session, tenant_id, target_system="aitm", kind="aitm.review.submit",

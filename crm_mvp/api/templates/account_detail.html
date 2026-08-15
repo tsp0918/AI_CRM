@@ -11,6 +11,43 @@
   {% if account.external_system %} / <span class="mono">{{ account.external_system }}:{{ account.external_id }}</span>{% endif %}
 </p>
 
+<div class="card">
+  <h2>コンプライアンス</h2>
+  <p class="subtitle" style="margin-bottom:12px;">
+    {% if account.external_system %}
+    <span class="badge badge-compliance-clear">ERP登録済み</span>
+    {% else %}
+    <span class="badge badge-compliance-unknown">ERP未登録</span>
+    {% endif %}
+    {% if account.aitm_party_id %}
+    <span class="mono" style="margin-left:8px;">aitm_party_id: {{ account.aitm_party_id }}</span>
+    {% endif %}
+  </p>
+  {% if compliance_statuses %}
+  <table>
+    <thead><tr><th>チェック種別</th><th>結果</th><th>確認日時</th><th>有効期限</th></tr></thead>
+    <tbody>
+      {% for s in compliance_statuses %}
+      <tr>
+        <td class="mono">{{ s.check_type }}</td>
+        <td><span class="badge badge-compliance-{{ s.outcome }}">{{ s.outcome }}</span></td>
+        <td class="mono" style="font-size:12px;">{{ s.checked_at.strftime("%Y-%m-%d %H:%M") if s.checked_at else "—" }}</td>
+        <td class="mono" style="font-size:12px;">
+          {{ s.valid_until.strftime("%Y-%m-%d") if s.valid_until else "—" }}
+          {% if not s.is_fresh %}<span class="badge badge-compliance-needs_review" style="margin-left:4px;">期限切れ</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">まだスクリーニングを実施していません。</div>
+  {% endif %}
+  <form method="post" action="/ui/accounts/{{ account.id }}/rescan-compliance" style="margin-top:10px;">
+    <button type="submit" class="btn btn-sm btn-secondary">今すぐ再スクリーニングする</button>
+  </form>
+</div>
+
 {% if children %}
 <div class="card">
   <h2>子取引先({{ children | length }}件)</h2>

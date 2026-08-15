@@ -33,6 +33,7 @@ from ...services.engagement_relationships import (
 )
 from ...services.account_hierarchy import list_accounts
 from ...services.artifact_gate import evaluate_artifact_gate
+from ...services.compliance_screening import ensure_account_screened
 from ...services.party_compliance import check_party_clearance, worst_compliance_outcome
 from ...services.pricing import add_line_item, list_line_items, remove_line_item
 from ...services.review_case import (
@@ -96,6 +97,15 @@ def engagement_new_submit(
     account = Account(tenant_id=ui_session.tenant_id, name=account_name.strip())
     session.add(account)
     session.flush()
+    # 新規取引先の作成時に自動でスクリーニングを走らせる(C2-4)。
+    ensure_account_screened(session, ui_session.tenant_id, account)
+
+    party_block_reason = check_party_clearance(
+        session, ui_session.tenant_id, account_id=account.id,
+    )
+    if party_block_reason is not None:
+        session.rollback()
+        return redirect_with_flash("/ui/engagements/new", party_block_reason, "error")
 
     engagement = Engagement(
         tenant_id=ui_session.tenant_id, account_id=account.id,

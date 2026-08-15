@@ -246,3 +246,128 @@ async def receive_aitm_review_result(
 
     session.commit()
     return {"status": "processed"}
+
+
+def _resolve_party_account(
+    session: Session, tenant_id: uuid.UUID, payload: dict,
+) -> Account | None:
+    """`crm_account_id`(優先)または`aitm_party_id`からAccountを解決する。"""
+    crm_account_id = payload.get("crm_account_id")
+    if crm_account_id:
+        try:
+            account = session.get(Account, uuid.UUID(crm_account_id))
+        except ValueError:
+            account = None
+        if account is not None and account.tenant_id == tenant_id:
+            return account
+
+    aitm_party_id = payload.get("aitm_party_id")
+    if aitm_party_id:
+        return session.execute(
+            select(Account).where(
+                Account.tenant_id == tenant_id, Account.aitm_party_id == aitm_party_id,
+            )
+        ).scalar_one_or_none()
+    return None
+
+
+@router.post("/aitm/party-event")
+async def receive_aitm_party_event(
+    request: Request, session: Session = Depends(get_session),
+) -> dict:
+    """AI_TMからの取引先イベント受信(2026-08-15, IF-11相当・§7.4)。
+
+    `event_type`で2種類を多重化する(CRM_連携_実装計画.md Phase 2追補):
+    - `party.linked`: CRM発生の取引先がERPへ後日登録され、AI_TM側の名寄せで
+      同一partyとマージされた通知(§5.1)。`external_system`/`external_id`と
+      `aitm_party_id`をCRM側に反映する。
+    - `screening.alert`: 継続監視中の取引先で新たな懸念が検出された通知。
+      該当Accountの`ComplianceStatus`を更新し、進行中の商談にActionItemを
+      起票する(`/webhooks/sanctions-list-updated`と同じ設計原則4)。
+    """
+    ctx = await verify_webhook(
+        request, source="aitm", secret_env="AITM_PARTY_WEBHOOK_SECRET",
+        bearer_env="AITM_PARTY_WEBHOOK_BEARER",
+    )
+    session.execute(
+        text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
+        {"tenant_id": str(ctx.tenant_id)},
+    )
+
+    event_id = str(ctx.payload.get("event_id") or "")
+    event_type = str(ctx.payload.get("event_type") or "")
+    event, is_new = record_webhook_event(
+        session, ctx.tenant_id, event_id=event_id or f"{event_type}:{datetime.now(timezone.utc).isoformat()}",
+        source_system="aitm", event_type=event_type or "party_event", payload=ctx.payload,
+    )
+    if not is_new:
+        session.commit()
+        return {"status": "duplicate"}
+
+    account = _resolve_party_account(session, ctx.tenant_id, ctx.payload)
+    if account is None:
+        event.result = WebhookEventResult.ERROR
+        event.error = "該当するAccountが見つかりません"
+        session.commit()
+        return {"status": "processed"}
+
+    if event_type == "party.linked":
+        erp_bp_code = ctx.payload.get("erp_bp_code")
+        if erp_bp_code:
+            account.external_system = "erp"
+            account.external_id = erp_bp_code
+        aitm_party_id = ctx.payload.get("aitm_party_id")
+        if aitm_party_id:
+            account.aitm_party_id = aitm_party_id
+
+    elif event_type == "screening.alert":
+        try:
+            check_type = ComplianceCheckType(ctx.payload.get("check_type", ""))
+        except ValueError:
+            check_type = ComplianceCheckType.SANCTIONS
+        try:
+            outcome = ComplianceOutcome(ctx.payload.get("outcome", ""))
+        except ValueError:
+            outcome = ComplianceOutcome.NEEDS_REVIEW
+
+        status = session.execute(
+            select(ComplianceStatus).where(
+                ComplianceStatus.tenant_id == ctx.tenant_id,
+                ComplianceStatus.account_id == account.id,
+                ComplianceStatus.check_type == check_type,
+            )
+        ).scalar_one_or_none()
+        if status is None:
+            status = ComplianceStatus(
+                tenant_id=ctx.tenant_id, account_id=account.id, check_type=check_type,
+            )
+            session.add(status)
+        now = datetime.now(timezone.utc)
+        status.outcome = outcome
+        status.provider = "aitm"
+        status.detail = ctx.payload.get("detail") or {}
+        status.checked_at = now
+        status.valid_until = now
+
+        if outcome in (ComplianceOutcome.HIT, ComplianceOutcome.NEEDS_REVIEW):
+            engagements = session.execute(
+                select(Engagement).where(
+                    Engagement.tenant_id == ctx.tenant_id,
+                    Engagement.account_id == account.id,
+                    Engagement.stage.in_(NON_TERMINAL_STAGES),
+                )
+            ).scalars().all()
+            for engagement in engagements:
+                create_manual_action_item(
+                    session, ctx.tenant_id, engagement.id,
+                    assigned_to=SANCTIONS_ACTION_ASSIGNEE,
+                    task=(
+                        f"継続監視アラート: 取引先「{account.name}」で"
+                        f"{check_type.value}の懸念が検出されました({outcome.value})。"
+                        "取引先・商談の取り扱いを確認してください。"
+                    ),
+                    assigned_by="system:aitm-party-webhook",
+                )
+
+    session.commit()
+    return {"status": "processed"}

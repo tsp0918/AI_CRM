@@ -11,22 +11,20 @@ MVP のスコープ外 — Account は他経路(ミラー同期等)で存在す�
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..enums import ComplianceCheckType, ComplianceOutcome
-from ..models import Account, ComplianceStatus
+from ..models import Account
 from ..ports.screening import ScreeningPort
+from ..services.compliance_screening import run_compliance_check
 from ..services.idempotency import compute_idempotency_key
 from .deps import get_screening_port, get_tenant_id, get_tenant_scoped_session
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
-
-FRESHNESS_WINDOW_DAYS = 180
 
 
 class ComplianceCheckRequest(BaseModel):
@@ -61,29 +59,9 @@ def submit_compliance_check(
     idempotency_key = compute_idempotency_key(
         account.name, body.check_type.value, policy_version="v1",
     )
-    result = screening.screen(account.name, body.check_type)
-
-    status = session.execute(
-        select(ComplianceStatus).where(
-            ComplianceStatus.tenant_id == tenant_id,
-            ComplianceStatus.account_id == account.id,
-            ComplianceStatus.check_type == body.check_type,
-        )
-    ).scalar_one_or_none()
-    now = datetime.now(timezone.utc)
-    if status is None:
-        status = ComplianceStatus(
-            tenant_id=tenant_id, account_id=account.id, check_type=body.check_type,
-        )
-        session.add(status)
-
-    status.outcome = result.outcome
-    status.provider = result.provider
-    status.provider_request_id = result.provider_request_id
-    status.checked_at = now
-    status.valid_until = now + timedelta(days=FRESHNESS_WINDOW_DAYS)
-    # §3.7: 証跡は参照のみ。result.detail(外部APIの生レスポンス)は
-    # 一時的な受け渡し用であり、そのまま永続化はしない。
+    # §3.7: 証跡は参照のみ。screening結果の生レスポンスはそのまま永続化しない
+    # (run_compliance_checkはoutcome/provider/provider_request_idのみ保存する)。
+    status = run_compliance_check(session, tenant_id, account, body.check_type, screening)
     session.commit()
     session.refresh(status)
 

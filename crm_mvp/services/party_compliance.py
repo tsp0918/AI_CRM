@@ -75,3 +75,24 @@ def check_party_clearance(
             return f"エンドユーザー「{name}」が制裁対象(HIT)のため、見積・契約を作成できません"
 
     return None
+
+
+def build_party_ref(account: Account) -> dict:
+    """AI_TM送出用の`party_ref`構造体(CRM_連携引き継ぎ書.md §5.1)を組み立てる。
+
+    社名文字列を照合キーにせず、`aitm_party_id`(既知なら)・`erp_bp_code`
+    (`external_system=="erp"`の場合の`external_id`)・CRM側Account IDを
+    併せて送ることで、AI_TM側の名寄せ処理をスキップ/高速化できる。
+    """
+    erp_bp_code = account.external_id if account.external_system == "erp" else None
+    return {
+        "source_system": "crm",
+        "crm_account_id": str(account.id),
+        "erp_bp_code": erp_bp_code,
+        "aitm_party_id": account.aitm_party_id,
+        "legal_name": account.name,
+        "legal_name_local": account.name,
+        "country": account.country,
+        "address": None,
+        "aliases": [],
+    }

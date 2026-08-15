@@ -30,6 +30,11 @@ class Account(Base, UUIDPk, Timestamped, TenantScoped):
     external_system: Mapped[str | None] = mapped_column(String(32))
     external_id: Mapped[str | None] = mapped_column(String(128))
 
+    # AI_TM が名寄せ後に採番する3システム共通の取引先識別子
+    # (CRM_連携引き継ぎ書.md §5.1)。一度でも送出・受領した後はこれを
+    # 優先して以降のリクエストに使い、名寄せ処理をスキップできる。
+    aitm_party_id: Mapped[str | None] = mapped_column(String(64), index=True)
+
     # 法人グループのロールアップ(親会社/子会社)。Engagement.parent_engagement_id
     # と同じ自己参照パターン。子会社Accountが削除されても履歴は残したいため
     # SET NULL(2026-08-13 ユーザー要望: 取引先を頂点にした売上ロールアップ)。

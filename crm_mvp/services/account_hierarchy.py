@@ -26,7 +26,11 @@ def create_grouping_account(
     name: str, parent_account_id: uuid.UUID | None = None,
 ) -> Account:
     """ERPの取引先データに紐付かない、法人グループをまとめるためだけの
-    CRM独自のAccountを作る(例: "NSC Group")。"""
+    CRM独自のAccountを作る(例: "NSC Group")。
+
+    C2-4(Account作成時の自動スクリーニングフック)は意図的に適用しない —
+    これは取引の相手方ではなく階層をまとめるための箱であり、それ自体が
+    輸出管理・与信の対象になることはない。"""
     if not name.strip():
         raise ValueError("取引先名を入力してください")
 

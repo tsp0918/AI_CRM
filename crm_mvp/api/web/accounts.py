@@ -13,12 +13,17 @@ import uuid
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ...models import Account
+from ...models import Account, ComplianceStatus
 from ...services.account_hierarchy import (
     create_grouping_account, get_family_account_ids, list_accounts_tree_ordered,
     list_engagements_for_account, list_leads_for_account, set_parent_account,
+)
+from ...ports.screening import MockScreeningAdapter
+from ...services.compliance_screening import (
+    DEFAULT_AUTO_SCREENING_CHECK_TYPES, run_compliance_check,
 )
 from ...services.revenue_report import aggregate_by, line_item_facts
 from .common import base_context, redirect_with_flash
@@ -122,6 +127,13 @@ def account_detail(
         account_facts, lambda f: f["product"].name if f["product"] else "未分類",
     )
 
+    compliance_statuses = session.execute(
+        select(ComplianceStatus).where(
+            ComplianceStatus.tenant_id == ui_session.tenant_id,
+            ComplianceStatus.account_id == account.id,
+        ).order_by(ComplianceStatus.check_type)
+    ).scalars().all()
+
     context = base_context(
         session, ui_session, active_nav="accounts", request=request, flash=flash, flash_type=flash_type,
     )
@@ -130,5 +142,24 @@ def account_detail(
         "engagements": engagements, "leads": leads,
         "lead_status_labels": LEAD_STATUS_LABELS,
         "revenue_by_product": revenue_by_product,
+        "compliance_statuses": compliance_statuses,
     })
     return templates.TemplateResponse(request, "account_detail.html", context)
+
+
+@router.post("/ui/accounts/{account_id}/rescan-compliance")
+def account_rescan_compliance(
+    account_id: uuid.UUID,
+    ui_session: UiSession = Depends(require_ui_session),
+    session: Session = Depends(get_ui_db_session),
+) -> RedirectResponse:
+    """取引先詳細画面からの手動再スクリーニング(C2-9)。鮮度に関わらず
+    既定チェック種別を強制的に再実行する(`ensure_account_screened`は
+    freshなら再実行しないため、"今すぐ再確認したい"という操作には
+    `run_compliance_check`を種別ごとに直接呼ぶ)。"""
+    account = _get_account_or_404(session, ui_session, account_id)
+    screening = MockScreeningAdapter()
+    for check_type in DEFAULT_AUTO_SCREENING_CHECK_TYPES:
+        run_compliance_check(session, ui_session.tenant_id, account, check_type, screening)
+    session.commit()
+    return redirect_with_flash(f"/ui/accounts/{account_id}", "コンプライアンスを再確認しました")

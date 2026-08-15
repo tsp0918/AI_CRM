@@ -17,8 +17,10 @@ from sqlalchemy.orm import Session
 
 from ..enums import AccessLevel, LeadStatus, Stage, Stance, TouchChannel
 from ..models import Account, Engagement, Lead, Touch
+from .compliance_screening import ensure_account_screened
 from .contacts import register_contact_and_link
 from .lead_scoring import LeadScore, compute_lead_score
+from .party_compliance import check_party_clearance
 
 MQL_SCORE_THRESHOLD = 50
 
@@ -113,6 +115,14 @@ def convert_lead(
         account = Account(tenant_id=tenant_id, name=lead.company_name)
         session.add(account)
         session.flush()
+
+    # 既存取引先なら鮮度チェック・再スクリーニング(C2-5)、新規なら初回
+    # スクリーニング(C2-4)。いずれもensure_account_screened側でfreshなら
+    # 再実行しない。
+    ensure_account_screened(session, tenant_id, account)
+    party_block_reason = check_party_clearance(session, tenant_id, account_id=account.id)
+    if party_block_reason is not None:
+        raise ValueError(party_block_reason)
 
     engagement = Engagement(
         tenant_id=tenant_id, account_id=account.id,
