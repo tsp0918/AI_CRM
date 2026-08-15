@@ -31,7 +31,9 @@ from ...services.decay_policy import compute_decays_at
 from ...services.engagement_relationships import (
     create_child_engagement, list_child_engagements,
 )
+from ...services.account_hierarchy import list_accounts
 from ...services.artifact_gate import evaluate_artifact_gate
+from ...services.party_compliance import check_party_clearance, worst_compliance_outcome
 from ...services.pricing import add_line_item, list_line_items, remove_line_item
 from ...services.review_case import (
     check_review_clearance, submit_formal_review, submit_provisional_review,
@@ -250,6 +252,27 @@ def engagement_detail(
         ).scalars()
     } if contracts else {}
 
+    # 取引先・エンドユーザーのコンプライアンス状態(Phase 2a)。
+    # 見積・契約に紐づくend_user_account_idごとに1回だけ問い合わせる。
+    end_user_ids = {
+        doc.end_user_account_id for doc in [*quotes, *contracts]
+        if doc.end_user_account_id
+    }
+    compliance_by_account_id = {
+        engagement.account_id: worst_compliance_outcome(
+            session, ui_session.tenant_id, engagement.account_id,
+        ),
+    }
+    for eu_id in end_user_ids:
+        compliance_by_account_id[eu_id] = worst_compliance_outcome(
+            session, ui_session.tenant_id, eu_id,
+        )
+    end_user_candidates = [
+        a for a in list_accounts(session, ui_session.tenant_id) if a.id != account.id
+    ]
+    accounts_by_id = {a.id: a for a in end_user_candidates}
+    accounts_by_id[account.id] = account
+
     parent_engagement = None
     parent_account = None
     if engagement.parent_engagement_id:
@@ -289,6 +312,9 @@ def engagement_detail(
         "review_cases_by_quote": review_cases_by_quote,
         "contracts": contracts, "contract_line_items": contract_line_items,
         "review_cases_by_contract": review_cases_by_contract,
+        "compliance_by_account_id": compliance_by_account_id,
+        "end_user_candidates": end_user_candidates,
+        "accounts_by_id": accounts_by_id,
         "quote_status_values": list(QuoteStatus),
         "contract_status_values": list(ContractStatus),
         "parent_engagement": parent_engagement, "parent_account": parent_account,
@@ -683,10 +709,14 @@ def remove_line_item_ui(
 def create_quote_ui(
     engagement_id: uuid.UUID,
     valid_until: str = Form(""),
+    destination_country: str = Form(""),
+    end_user_account_id: str = Form(""),
+    end_use: str = Form(""),
     ui_session: UiSession = Depends(require_ui_session),
     session: Session = Depends(get_ui_db_session),
 ) -> RedirectResponse:
     engagement = _get_engagement_or_404(session, ui_session, engagement_id)
+    end_user_id = uuid.UUID(end_user_account_id) if end_user_account_id.strip() else None
 
     _, gate_result = evaluate_artifact_gate(
         session, ui_session.tenant_id, engagement, ArtifactType.QUOTE,
@@ -698,11 +728,20 @@ def create_quote_ui(
         )
         return redirect_with_flash(f"/ui/engagements/{engagement_id}", message, "error")
 
+    party_block_reason = check_party_clearance(
+        session, ui_session.tenant_id, account_id=engagement.account_id,
+        end_user_account_id=end_user_id,
+    )
+    if party_block_reason is not None:
+        return redirect_with_flash(f"/ui/engagements/{engagement_id}", party_block_reason, "error")
+
     try:
         quote = create_quote_from_engagement(
             session, ui_session.tenant_id, engagement,
             valid_until=date.fromisoformat(valid_until.strip()) if valid_until.strip() else None,
             actor=f"human:{ui_session.actor_id}",
+            destination_country=destination_country.strip() or None,
+            end_user_account_id=end_user_id, end_use=end_use.strip() or None,
         )
     except ValueError as exc:
         session.rollback()
@@ -761,6 +800,9 @@ def create_contract_ui(
     quote_id: str = Form(""),
     start_date: str = Form(""),
     end_date: str = Form(""),
+    destination_country: str = Form(""),
+    end_user_account_id: str = Form(""),
+    end_use: str = Form(""),
     ui_session: UiSession = Depends(require_ui_session),
     session: Session = Depends(get_ui_db_session),
 ) -> RedirectResponse:
@@ -768,6 +810,11 @@ def create_contract_ui(
     quote = None
     if quote_id.strip():
         quote = _get_quote_or_404(session, ui_session, engagement_id, uuid.UUID(quote_id))
+
+    end_user_id = uuid.UUID(end_user_account_id) if end_user_account_id.strip() else None
+    # フォーム未入力なら、紐付ける見積のエンドユーザーを引き継ぐ
+    # (create_contract() 側の継承ロジックと同じ実効値をゲート判定にも使う)。
+    effective_end_user_id = end_user_id or (quote.end_user_account_id if quote else None)
 
     _, gate_result = evaluate_artifact_gate(
         session, ui_session.tenant_id, engagement, ArtifactType.CONTRACT,
@@ -779,12 +826,21 @@ def create_contract_ui(
         )
         return redirect_with_flash(f"/ui/engagements/{engagement_id}", message, "error")
 
+    party_block_reason = check_party_clearance(
+        session, ui_session.tenant_id, account_id=engagement.account_id,
+        end_user_account_id=effective_end_user_id,
+    )
+    if party_block_reason is not None:
+        return redirect_with_flash(f"/ui/engagements/{engagement_id}", party_block_reason, "error")
+
     try:
         contract = create_contract(
             session, ui_session.tenant_id, engagement, quote=quote,
             start_date=date.fromisoformat(start_date.strip()) if start_date.strip() else None,
             end_date=date.fromisoformat(end_date.strip()) if end_date.strip() else None,
             actor=f"human:{ui_session.actor_id}",
+            destination_country=destination_country.strip() or None,
+            end_user_account_id=end_user_id, end_use=end_use.strip() or None,
         )
     except ValueError as exc:
         session.rollback()

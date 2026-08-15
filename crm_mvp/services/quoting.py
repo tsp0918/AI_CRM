@@ -35,6 +35,8 @@ def _generate_number(session: Session, tenant_id: uuid.UUID, model, prefix: str)
 def create_quote_from_engagement(
     session: Session, tenant_id: uuid.UUID, engagement: Engagement, *,
     valid_until: date | None, actor: str,
+    destination_country: str | None = None,
+    end_user_account_id: uuid.UUID | None = None, end_use: str | None = None,
 ) -> Quote:
     items = list_line_items(session, tenant_id, engagement.id)
     if not items:
@@ -46,6 +48,8 @@ def create_quote_from_engagement(
         status=QuoteStatus.DRAFT, valid_until=valid_until,
         total_amount=sum((i.line_total for i in items), Decimal("0")),
         currency=engagement.currency, written_by=actor,
+        destination_country=destination_country,
+        end_user_account_id=end_user_account_id, end_use=end_use,
     )
     session.add(quote)
     session.flush()
@@ -91,11 +95,21 @@ def create_contract(
     session: Session, tenant_id: uuid.UUID, engagement: Engagement, *,
     quote: Quote | None = None, start_date: date | None = None,
     end_date: date | None = None, actor: str,
+    destination_country: str | None = None,
+    end_user_account_id: uuid.UUID | None = None, end_use: str | None = None,
 ) -> Contract:
     """quote が指定されればその明細をコピーする。無指定なら現在の
-    Engagement の商品構成を直接コピーする(見積もりを介さない直接発行)。"""
+    Engagement の商品構成を直接コピーする(見積もりを介さない直接発行)。
+
+    destination_country/end_user_account_id/end_use が未指定で quote が
+    指定されている場合、quote 側の値を引き継ぐ(見積時点で入力済みの
+    エンドユーザー情報を契約発行のたびに入力し直させないため)。
+    """
     if quote is not None:
         source_items = list_quote_line_items(session, tenant_id, quote.id)
+        destination_country = destination_country or quote.destination_country
+        end_user_account_id = end_user_account_id or quote.end_user_account_id
+        end_use = end_use or quote.end_use
     else:
         source_items = list_line_items(session, tenant_id, engagement.id)
     if not source_items:
@@ -108,6 +122,8 @@ def create_contract(
         status=ContractStatus.DRAFT, start_date=start_date, end_date=end_date,
         total_amount=sum((i.line_total for i in source_items), Decimal("0")),
         currency=engagement.currency, written_by=actor,
+        destination_country=destination_country,
+        end_user_account_id=end_user_account_id, end_use=end_use,
     )
     session.add(contract)
     session.flush()

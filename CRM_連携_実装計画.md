@@ -128,10 +128,18 @@ Phase 1へ意図的に先送り(コンシューマ不在のため)。C0-4はス�
 
 ### Phase 2 — 取引先とエンドユーザー
 
+**進捗(2026-08-15): Phase 2a(worse-case-winsゲート)実装済み・全テストgreen
+(631件、うち新規17件)。実AI_TM連携が前提のC2-1/C2-4/C2-6/C2-7/C2-10は
+意図的に未着手 — 詳細は下表参照。**
+
 | ID | 追加注記 |
 |---|---|
-| C2-1 | `build_party_ref()`は`Account`の`external_system`/`external_id`(既存)と`aitm_party_id`(新規)を組み合わせるだけで、既存パターンの延長 |
-| C2-4 | 既存の`Account`作成経路(画面`/ui/accounts`相当、Lead変換時の`convert_lead()`、ERP CSV取込の3経路)**すべて**にフックが必要。特に`convert_lead()`(`crm_mvp/services/lead_lifecycle.py`)は見落としやすい |
+| C2-1 | `build_party_ref()`は`Account`の`external_system`/`external_id`(既存)と`aitm_party_id`(新規)を組み合わせるだけで、既存パターンの延長。**[未着手]** 実AI_TM連携が前提のため見送り |
+| C2-2相当 | エンドユーザーのデータモデルと選択UI。**[完了]** Phase 1aで追加済みだったが一度も書き込まれていなかった`Quote`/`Contract`の`destination_country`/`end_user_account_id`/`end_use`列を、`create_quote_from_engagement`/`create_contract`(`crm_mvp/services/quoting.py`)のキーワード引数として実際に埋める導線と、`engagement_detail.html`の見積・契約作成フォームに選択欄を追加した。契約は見積の設定を自動継承する |
+| C2-4 | 既存の`Account`作成経路(画面`/ui/accounts`相当、Lead変換時の`convert_lead()`、ERP CSV取込の3経路)**すべて**にフックが必要。特に`convert_lead()`(`crm_mvp/services/lead_lifecycle.py`)は見落としやすい。**[未着手]** 自動発火のタイミング設計(作成直後か案件化時か)が未確定のため手動トリガーのまま据え置き |
+| C2-8相当(worse-case-wins) | 商談・見積・契約の作成ブロック(§8.1/§8.3)。**[部分完了]** 新規`crm_mvp/services/party_compliance.py`の`check_party_clearance()`が、既存の`ComplianceStatus`(本セッション以前から存在するAccount単位モデル)を使って取引先・エンドユーザーいずれかが`HIT`なら見積・契約作成をブロックする。`worst_compliance_outcome()`で「より厳しい方」を判定。新しい外部連携は不要だった。**今回は`HIT`のみ判定**(`NEEDS_REVIEW`/`BLOCKED`/`UNKNOWN`は将来課題)。**Engagement作成時点のブロックは未着手**(作成経路が3つに分かれており次スライス送り) |
+| C2-6/C2-7 | IF-11(`screening.alert`/`party.linked`)・IF-12新スキーマ対応。**[未着手]** 既存`receive_compliance_judgment`で汎用的にComplianceStatusを更新できており、実API契約確定後に着手する方が手戻りが少ない |
+| C2-10 | IF-02バッチスクリーニング。**[未着手]** 運用ジョブでありコア要件ではない |
 
 ### Phase 3 — ERP連携
 

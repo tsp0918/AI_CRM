@@ -246,6 +246,86 @@ class TestQuotesAndContracts:
         assert "flash_type=error" in resp.headers["location"]
         assert db_session.query(Quote).filter_by(engagement_id=engagement.id).count() == 0
 
+    def test_create_quote_blocked_when_counterparty_is_hit(self, ui_client, db_session, tenant_id):
+        from crm_mvp.enums import ComplianceCheckType, ComplianceOutcome
+        from crm_mvp.models import ComplianceStatus, Quote
+
+        account, engagement = create_account_and_engagement(db_session, tenant_id)
+        product = make_product(db_session, tenant_id)
+        db_session.add(ComplianceStatus(
+            tenant_id=tenant_id, account_id=account.id,
+            check_type=ComplianceCheckType.SANCTIONS, outcome=ComplianceOutcome.HIT,
+        ))
+        db_session.commit()
+
+        ui_client.post(
+            f"/ui/engagements/{engagement.id}/line-items",
+            data={"product_id": str(product.id), "quantity": "1", "discount_rate": "0"},
+        )
+        resp = ui_client.post(
+            f"/ui/engagements/{engagement.id}/quotes", data={}, follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert "flash_type=error" in resp.headers["location"]
+        assert db_session.query(Quote).filter_by(engagement_id=engagement.id).count() == 0
+
+    def test_create_quote_blocked_when_selected_end_user_is_hit(
+        self, ui_client, db_session, tenant_id,
+    ):
+        from crm_mvp.enums import ComplianceCheckType, ComplianceOutcome
+        from crm_mvp.models import Account, ComplianceStatus, Quote
+
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        product = make_product(db_session, tenant_id)
+        end_user = Account(tenant_id=tenant_id, name="危険エンドユーザー")
+        db_session.add(end_user)
+        db_session.flush()
+        db_session.add(ComplianceStatus(
+            tenant_id=tenant_id, account_id=end_user.id,
+            check_type=ComplianceCheckType.SANCTIONS, outcome=ComplianceOutcome.HIT,
+        ))
+        db_session.commit()
+
+        ui_client.post(
+            f"/ui/engagements/{engagement.id}/line-items",
+            data={"product_id": str(product.id), "quantity": "1", "discount_rate": "0"},
+        )
+        resp = ui_client.post(
+            f"/ui/engagements/{engagement.id}/quotes",
+            data={"end_user_account_id": str(end_user.id)}, follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert "flash_type=error" in resp.headers["location"]
+        assert db_session.query(Quote).filter_by(engagement_id=engagement.id).count() == 0
+
+    def test_create_quote_with_clear_end_user_succeeds(self, ui_client, db_session, tenant_id):
+        from crm_mvp.models import Account, Quote
+
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        product = make_product(db_session, tenant_id)
+        end_user = Account(tenant_id=tenant_id, name="安全なエンドユーザー")
+        db_session.add(end_user)
+        db_session.commit()
+
+        ui_client.post(
+            f"/ui/engagements/{engagement.id}/line-items",
+            data={"product_id": str(product.id), "quantity": "1", "discount_rate": "0"},
+        )
+        resp = ui_client.post(
+            f"/ui/engagements/{engagement.id}/quotes",
+            data={
+                "end_user_account_id": str(end_user.id), "destination_country": "US",
+                "end_use": "製造用",
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert "flash_type=error" not in resp.headers["location"]
+        quote = db_session.query(Quote).filter_by(engagement_id=engagement.id).one()
+        assert quote.end_user_account_id == end_user.id
+        assert quote.destination_country == "US"
+        assert quote.end_use == "製造用"
+
     def test_create_contract_from_quote(self, ui_client, db_session, tenant_id):
         _, engagement = create_account_and_engagement(db_session, tenant_id)
         product = make_product(db_session, tenant_id)

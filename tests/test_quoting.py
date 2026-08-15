@@ -73,6 +73,29 @@ class TestCreateQuoteFromEngagement:
                 db_session, tenant_id, engagement, valid_until=None, actor="human:ae-1",
             )
 
+    def test_end_user_fields_are_persisted(self, db_session, tenant_id):
+        from crm_mvp.models import Account
+
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        end_user = Account(tenant_id=tenant_id, name="エンドユーザー社")
+        db_session.add(end_user)
+        db_session.flush()
+        product = make_product(db_session, tenant_id)
+        pr.add_line_item(
+            db_session, tenant_id, engagement, product=product,
+            quantity=1, discount_rate=Decimal("0"),
+        )
+        db_session.flush()
+
+        quote = qt.create_quote_from_engagement(
+            db_session, tenant_id, engagement, valid_until=None, actor="human:ae-1",
+            destination_country="US", end_user_account_id=end_user.id, end_use="製造用",
+        )
+
+        assert quote.destination_country == "US"
+        assert quote.end_user_account_id == end_user.id
+        assert quote.end_use == "製造用"
+
     def test_quote_line_items_survive_engagement_line_item_changes(
         self, db_session, tenant_id,
     ):
@@ -164,6 +187,60 @@ class TestCreateContract:
         _, engagement = create_account_and_engagement(db_session, tenant_id)
         with pytest.raises(ValueError):
             qt.create_contract(db_session, tenant_id, engagement, quote=None, actor="human:ae-1")
+
+    def test_inherits_end_user_fields_from_quote(self, db_session, tenant_id):
+        from crm_mvp.models import Account
+
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        end_user = Account(tenant_id=tenant_id, name="エンドユーザー社")
+        db_session.add(end_user)
+        db_session.flush()
+        product = make_product(db_session, tenant_id)
+        pr.add_line_item(
+            db_session, tenant_id, engagement, product=product,
+            quantity=1, discount_rate=Decimal("0"),
+        )
+        db_session.flush()
+        quote = qt.create_quote_from_engagement(
+            db_session, tenant_id, engagement, valid_until=None, actor="human:ae-1",
+            destination_country="US", end_user_account_id=end_user.id, end_use="製造用",
+        )
+        db_session.flush()
+
+        contract = qt.create_contract(
+            db_session, tenant_id, engagement, quote=quote, actor="human:ae-1",
+        )
+
+        assert contract.destination_country == "US"
+        assert contract.end_user_account_id == end_user.id
+        assert contract.end_use == "製造用"
+
+    def test_explicit_end_user_overrides_quote_inheritance(self, db_session, tenant_id):
+        from crm_mvp.models import Account
+
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        quote_end_user = Account(tenant_id=tenant_id, name="見積時エンドユーザー")
+        contract_end_user = Account(tenant_id=tenant_id, name="契約時エンドユーザー")
+        db_session.add_all([quote_end_user, contract_end_user])
+        db_session.flush()
+        product = make_product(db_session, tenant_id)
+        pr.add_line_item(
+            db_session, tenant_id, engagement, product=product,
+            quantity=1, discount_rate=Decimal("0"),
+        )
+        db_session.flush()
+        quote = qt.create_quote_from_engagement(
+            db_session, tenant_id, engagement, valid_until=None, actor="human:ae-1",
+            end_user_account_id=quote_end_user.id,
+        )
+        db_session.flush()
+
+        contract = qt.create_contract(
+            db_session, tenant_id, engagement, quote=quote, actor="human:ae-1",
+            end_user_account_id=contract_end_user.id,
+        )
+
+        assert contract.end_user_account_id == contract_end_user.id
 
 
 class TestUpdateContractStatus:

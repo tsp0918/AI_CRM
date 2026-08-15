@@ -321,6 +321,15 @@
       <span class="badge">{{ q.status }}</span>
       {% set rc = review_cases_by_quote.get(q.id) %}
       {% if rc %}<span class="badge badge-review-{{ rc.status }}">審査: {{ rc.status }}</span>{% endif %}
+      {% set cp_outcome = compliance_by_account_id.get(engagement.account_id) %}
+      {% if cp_outcome %}<span class="badge badge-compliance-{{ cp_outcome }}">取引先: {{ cp_outcome }}</span>{% endif %}
+      {% if q.end_user_account_id %}
+      {% set eu_outcome = compliance_by_account_id.get(q.end_user_account_id) %}
+      {% set eu_account = accounts_by_id.get(q.end_user_account_id) %}
+      <span class="badge badge-compliance-{{ eu_outcome or 'unknown' }}">
+        EU: {{ eu_account.name if eu_account else "—" }}{% if eu_outcome %} ({{ eu_outcome }}){% endif %}
+      </span>
+      {% endif %}
       <span class="mono" style="margin-left:8px;">{{ "{:,.0f}".format(q.total_amount) }} {{ q.currency }}</span>
       {% if q.valid_until %}<span class="muted" style="font-size:12px;">(有効期限 {{ q.valid_until }})</span>{% endif %}
     </div>
@@ -360,6 +369,17 @@
     <form method="post" action="/ui/engagements/{{ engagement.id }}/quotes" style="margin-top:10px; max-width:320px;">
       <label for="valid_until">有効期限(任意)</label>
       <input type="date" id="valid_until" name="valid_until">
+      <label for="q_end_user_account_id">エンドユーザー(取引先と異なる場合のみ選択)</label>
+      <select id="q_end_user_account_id" name="end_user_account_id">
+        <option value="">(取引先と同一)</option>
+        {% for a in end_user_candidates %}
+        <option value="{{ a.id }}">{{ a.name }}</option>
+        {% endfor %}
+      </select>
+      <label for="q_destination_country">仕向地国(任意、ISO2桁)</label>
+      <input type="text" id="q_destination_country" name="destination_country" maxlength="2" placeholder="例: US">
+      <label for="q_end_use">用途(任意)</label>
+      <input type="text" id="q_end_use" name="end_use">
       <button type="submit" class="btn btn-sm">現在の商品構成から作成</button>
     </form>
   </details>
@@ -379,6 +399,15 @@
       <span class="badge">{{ c.status }}</span>
       {% set rc = review_cases_by_contract.get(c.id) %}
       {% if rc %}<span class="badge badge-review-{{ rc.status }}">審査: {{ rc.status }}</span>{% endif %}
+      {% set cp_outcome = compliance_by_account_id.get(engagement.account_id) %}
+      {% if cp_outcome %}<span class="badge badge-compliance-{{ cp_outcome }}">取引先: {{ cp_outcome }}</span>{% endif %}
+      {% if c.end_user_account_id %}
+      {% set eu_outcome = compliance_by_account_id.get(c.end_user_account_id) %}
+      {% set eu_account = accounts_by_id.get(c.end_user_account_id) %}
+      <span class="badge badge-compliance-{{ eu_outcome or 'unknown' }}">
+        EU: {{ eu_account.name if eu_account else "—" }}{% if eu_outcome %} ({{ eu_outcome }}){% endif %}
+      </span>
+      {% endif %}
       <span class="mono" style="margin-left:8px;">{{ "{:,.0f}".format(c.total_amount) }} {{ c.currency }}</span>
       {% if c.start_date or c.end_date %}
       <span class="muted" style="font-size:12px;">({{ c.start_date or "—" }} 〜 {{ c.end_date or "—" }})</span>
@@ -435,6 +464,17 @@
           <input type="date" id="end_date" name="end_date">
         </div>
       </div>
+      <label for="c_end_user_account_id">エンドユーザー(取引先と異なる場合のみ選択。未選択かつ見積由来なら見積の設定を引き継ぐ)</label>
+      <select id="c_end_user_account_id" name="end_user_account_id">
+        <option value="">(取引先と同一 / 見積の設定を引き継ぐ)</option>
+        {% for a in end_user_candidates %}
+        <option value="{{ a.id }}">{{ a.name }}</option>
+        {% endfor %}
+      </select>
+      <label for="c_destination_country">仕向地国(任意、ISO2桁)</label>
+      <input type="text" id="c_destination_country" name="destination_country" maxlength="2" placeholder="例: US">
+      <label for="c_end_use">用途(任意)</label>
+      <input type="text" id="c_end_use" name="end_use">
       <button type="submit" class="btn btn-sm">発行する</button>
     </form>
   </details>
