@@ -16,6 +16,7 @@ from .quoting import Contract, ContractLineItem, Quote, QuoteLineItem
 from .weekly_review import WeeklyReview
 from .report_snapshot import ReportSnapshot
 from .integration import OutboxMessage, WebhookEvent
+from .review_case import ReviewCase
 
 __all__ = [
     "Account", "Contact", "ComplianceStatus",
@@ -32,4 +33,5 @@ __all__ = [
     "WeeklyReview",
     "ReportSnapshot",
     "OutboxMessage", "WebhookEvent",
+    "ReviewCase",
 ]

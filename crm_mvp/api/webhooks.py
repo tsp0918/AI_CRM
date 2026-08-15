@@ -11,15 +11,19 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from ..enums import ComplianceCheckType, ComplianceOutcome, Stage
-from ..models import Account, ComplianceStatus, Engagement
+from ..enums import (
+    ComplianceCheckType, ComplianceOutcome, ReviewCaseStatus, Stage,
+    WebhookEventResult,
+)
+from ..models import Account, ComplianceStatus, Engagement, ReviewCase
 from ..services.action_items import create_manual_action_item
-from .deps import get_tenant_id, get_tenant_scoped_session
+from .deps import get_session, get_tenant_id, get_tenant_scoped_session
+from .webhook_security import record_webhook_event, verify_webhook
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
@@ -159,3 +163,86 @@ def receive_sanctions_list_update(
 
     session.commit()
     return WebhookReceiptOut(hits_processed=len(body.hits))
+
+
+REVIEW_ACTION_ASSIGNEE = "輸出管理チーム"
+_UNRESOLVED_STATUSES = (
+    ReviewCaseStatus.HIT, ReviewCaseStatus.BLOCKED, ReviewCaseStatus.NEEDS_REVIEW,
+)
+
+
+@router.post("/aitm/review-result")
+async def receive_aitm_review_result(
+    request: Request, session: Session = Depends(get_session),
+) -> dict:
+    """AI_TMからの取引審査ケース判定結果(2026-08-15, IF-10相当・§7.4)。
+
+    `/webhooks/compliance-judgment`はアカウント単位のComplianceStatus更新用、
+    こちらはReviewCase(見積・契約という取引の1版)単位の判定結果通知用で
+    別エンドポイントにしている(CRM_連携_実装計画.md Phase 1a)。
+
+    Phase 0で単体実装済みの`verify_webhook`/`record_webhook_event`をここで
+    初めて実ルートに接続する。テナント文脈は署名検証済みの`ctx.tenant_id`を
+    正とする(X-Tenant-Idヘッダの二重パースを避けるため、既存2エンドポイント
+    と異なりDepends(get_tenant_id)は使わない)。
+    """
+    ctx = await verify_webhook(
+        request, source="aitm", secret_env="AITM_REVIEW_WEBHOOK_SECRET",
+        bearer_env="AITM_REVIEW_WEBHOOK_BEARER",
+    )
+    session.execute(
+        text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
+        {"tenant_id": str(ctx.tenant_id)},
+    )
+
+    case_no = str(ctx.payload.get("case_no", ""))
+    revision = int(ctx.payload.get("revision", 0))
+    event_id = str(ctx.payload.get("event_id") or f"{case_no}:{revision}")
+
+    event, is_new = record_webhook_event(
+        session, ctx.tenant_id, event_id=event_id, source_system="aitm",
+        event_type="review.judged", payload=ctx.payload,
+    )
+    if not is_new:
+        session.commit()
+        return {"status": "duplicate"}
+
+    review_case = session.execute(
+        select(ReviewCase).where(
+            ReviewCase.tenant_id == ctx.tenant_id, ReviewCase.case_no == case_no,
+        )
+    ).scalar_one_or_none()
+    if review_case is None:
+        event.result = WebhookEventResult.ERROR
+        event.error = f"該当する ReviewCase が見つかりません: {case_no}"
+        session.commit()
+        return {"status": "processed"}
+
+    if revision <= review_case.revision:
+        event.result = WebhookEventResult.STALE
+        session.commit()
+        return {"status": "processed"}
+
+    try:
+        status = ReviewCaseStatus(ctx.payload.get("status", ""))
+    except ValueError:
+        status = ReviewCaseStatus.NEEDS_REVIEW
+
+    review_case.status = status
+    review_case.revision = revision
+    review_case.detail = ctx.payload.get("detail") or {}
+    review_case.decided_at = datetime.now(timezone.utc)
+    valid_until_raw = ctx.payload.get("valid_until")
+    if valid_until_raw:
+        review_case.valid_until = datetime.fromisoformat(valid_until_raw)
+
+    if status in _UNRESOLVED_STATUSES:
+        create_manual_action_item(
+            session, ctx.tenant_id, review_case.engagement_id,
+            assigned_to=REVIEW_ACTION_ASSIGNEE,
+            task=f"取引審査ケース {case_no} の判定結果: {status.value}。内容を確認してください。",
+            assigned_by="system:aitm-review-webhook",
+        )
+
+    session.commit()
+    return {"status": "processed"}

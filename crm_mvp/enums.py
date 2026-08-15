@@ -321,3 +321,21 @@ class OutboxResult(StrEnum):
     SENT = "sent"
     RETRY = "retry"
     FAILED_NO_RETRY = "failed_no_retry"
+
+
+class ReviewType(StrEnum):
+    """AI_TMへの取引審査の種別(CRM_連携引き継ぎ書.md §2.3・§5.3)。"""
+
+    PROVISIONAL = "provisional"   # 仮審査(見積作成時)
+    FORMAL = "formal"             # 正式審査(契約発行時)
+
+
+class ReviewCaseStatus(StrEnum):
+    """`ReviewCase`(取引審査ケース)の現在状態。ComplianceOutcomeとは別に持つ
+    — 送信済み・判定待ちの`PENDING`状態を表現する必要があるため。"""
+
+    PENDING = "pending"           # AI_TMへ送信済み、判定待ち
+    CLEAR = "clear"
+    NEEDS_REVIEW = "needs_review"
+    HIT = "hit"
+    BLOCKED = "blocked"

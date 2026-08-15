@@ -12,13 +12,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ...enums import (
-    Confidence, ContractStatus, Criterion, EngagementRelationshipType,
-    ProposalStatus, QuoteStatus, ReviewStatus, Stage, VerificationMethod,
+    ArtifactType, Confidence, ContractStatus, Criterion,
+    EngagementRelationshipType, ProposalStatus, QuoteStatus, ReviewStatus,
+    Stage, VerificationMethod,
 )
 from ...models import (
     Account, ActionItem, Campaign, Contract, Engagement, EngagementLineItem,
     ExtractionProposal, GraphNode, IngestionSource, Lead, Product,
-    QualificationSlot, Quote, SalesGroup, User, Waiver,
+    QualificationSlot, Quote, ReviewCase, SalesGroup, User, Waiver,
 )
 from ...services.action_items import (
     assign_action_item, complete_action_item, create_manual_action_item,
@@ -30,7 +31,9 @@ from ...services.decay_policy import compute_decays_at
 from ...services.engagement_relationships import (
     create_child_engagement, list_child_engagements,
 )
+from ...services.artifact_gate import evaluate_artifact_gate
 from ...services.pricing import add_line_item, list_line_items, remove_line_item
+from ...services.review_case import submit_formal_review, submit_provisional_review
 from ...services.sales_groups import list_sales_groups_tree_ordered
 from ...services.quoting import (
     create_contract, create_quote_from_engagement, list_contract_line_items,
@@ -226,6 +229,25 @@ def engagement_detail(
         c.id: list_contract_line_items(session, ui_session.tenant_id, c.id) for c in contracts
     }
 
+    # 見積・契約ごとの審査ケース(1件のみ想定 — 版が変わっても同一quote/contract
+    # に対して再作成はしないため)。無ければテンプレート側でバッジ非表示。
+    review_cases_by_quote = {
+        rc.quote_id: rc for rc in session.execute(
+            select(ReviewCase).where(
+                ReviewCase.tenant_id == ui_session.tenant_id,
+                ReviewCase.quote_id.in_([q.id for q in quotes]),
+            )
+        ).scalars()
+    } if quotes else {}
+    review_cases_by_contract = {
+        rc.contract_id: rc for rc in session.execute(
+            select(ReviewCase).where(
+                ReviewCase.tenant_id == ui_session.tenant_id,
+                ReviewCase.contract_id.in_([c.id for c in contracts]),
+            )
+        ).scalars()
+    } if contracts else {}
+
     parent_engagement = None
     parent_account = None
     if engagement.parent_engagement_id:
@@ -262,7 +284,9 @@ def engagement_detail(
         "line_items": line_items, "available_products": available_products,
         "quotes": quotes, "quote_line_items": quote_line_items,
         "acceptable_quotes": acceptable_quotes,
+        "review_cases_by_quote": review_cases_by_quote,
         "contracts": contracts, "contract_line_items": contract_line_items,
+        "review_cases_by_contract": review_cases_by_contract,
         "quote_status_values": list(QuoteStatus),
         "contract_status_values": list(ContractStatus),
         "parent_engagement": parent_engagement, "parent_account": parent_account,
@@ -661,6 +685,17 @@ def create_quote_ui(
     session: Session = Depends(get_ui_db_session),
 ) -> RedirectResponse:
     engagement = _get_engagement_or_404(session, ui_session, engagement_id)
+
+    _, gate_result = evaluate_artifact_gate(
+        session, ui_session.tenant_id, engagement, ArtifactType.QUOTE,
+    )
+    if gate_result.blocks_transition:
+        reason = gate_result.next_best_action()
+        message = "見積もり作成の条件を満たしていません" + (
+            f"({reason.reason})" if reason else ""
+        )
+        return redirect_with_flash(f"/ui/engagements/{engagement_id}", message, "error")
+
     try:
         quote = create_quote_from_engagement(
             session, ui_session.tenant_id, engagement,
@@ -670,6 +705,11 @@ def create_quote_ui(
     except ValueError as exc:
         session.rollback()
         return redirect_with_flash(f"/ui/engagements/{engagement_id}", str(exc), "error")
+
+    submit_provisional_review(
+        session, ui_session.tenant_id, quote, engagement,
+        actor=f"human:{ui_session.actor_id}",
+    )
 
     session.commit()
     return redirect_with_flash(
@@ -716,6 +756,16 @@ def create_contract_ui(
     if quote_id.strip():
         quote = _get_quote_or_404(session, ui_session, engagement_id, uuid.UUID(quote_id))
 
+    _, gate_result = evaluate_artifact_gate(
+        session, ui_session.tenant_id, engagement, ArtifactType.CONTRACT,
+    )
+    if gate_result.blocks_transition:
+        reason = gate_result.next_best_action()
+        message = "契約発行の条件を満たしていません" + (
+            f"({reason.reason})" if reason else ""
+        )
+        return redirect_with_flash(f"/ui/engagements/{engagement_id}", message, "error")
+
     try:
         contract = create_contract(
             session, ui_session.tenant_id, engagement, quote=quote,
@@ -726,6 +776,11 @@ def create_contract_ui(
     except ValueError as exc:
         session.rollback()
         return redirect_with_flash(f"/ui/engagements/{engagement_id}", str(exc), "error")
+
+    submit_formal_review(
+        session, ui_session.tenant_id, contract, engagement,
+        actor=f"human:{ui_session.actor_id}",
+    )
 
     session.commit()
     return redirect_with_flash(

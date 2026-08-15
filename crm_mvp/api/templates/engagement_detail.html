@@ -319,6 +319,8 @@
     <div>
       <strong class="mono">{{ q.quote_number }}</strong>
       <span class="badge">{{ q.status }}</span>
+      {% set rc = review_cases_by_quote.get(q.id) %}
+      {% if rc %}<span class="badge badge-review-{{ rc.status }}">審査: {{ rc.status }}</span>{% endif %}
       <span class="mono" style="margin-left:8px;">{{ "{:,.0f}".format(q.total_amount) }} {{ q.currency }}</span>
       {% if q.valid_until %}<span class="muted" style="font-size:12px;">(有効期限 {{ q.valid_until }})</span>{% endif %}
     </div>
@@ -375,6 +377,8 @@
     <div>
       <strong class="mono">{{ c.contract_number }}</strong>
       <span class="badge">{{ c.status }}</span>
+      {% set rc = review_cases_by_contract.get(c.id) %}
+      {% if rc %}<span class="badge badge-review-{{ rc.status }}">審査: {{ rc.status }}</span>{% endif %}
       <span class="mono" style="margin-left:8px;">{{ "{:,.0f}".format(c.total_amount) }} {{ c.currency }}</span>
       {% if c.start_date or c.end_date %}
       <span class="muted" style="font-size:12px;">({{ c.start_date or "—" }} 〜 {{ c.end_date or "—" }})</span>

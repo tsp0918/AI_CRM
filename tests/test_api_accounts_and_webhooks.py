@@ -4,10 +4,19 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
+import time
 import uuid
+from datetime import datetime, timedelta, timezone
 
-from crm_mvp.enums import ComplianceCheckType, ComplianceOutcome, Stage
-from crm_mvp.models import Account, ActionItem, ComplianceStatus
+import pytest
+
+from crm_mvp.enums import (
+    ArtifactType, ComplianceCheckType, ComplianceOutcome, ReviewType, Stage,
+)
+from crm_mvp.models import Account, ActionItem, ComplianceStatus, ReviewCase
 
 from .conftest import create_account_and_engagement
 
@@ -131,6 +140,137 @@ class TestSanctionsListUpdatedWebhook:
         assert resp.status_code == 200
         assert resp.json() == {"status": "processed", "hits_processed": 1}
 
+
+def _signed_post(api_client, path: str, payload: dict, *, bearer: str, secret: str):
+    body = json.dumps(payload).encode("utf-8")
+    ts = str(int(time.time()))
+    sig = "sha256=" + hmac.new(
+        secret.encode("utf-8"), f"{ts}.".encode("utf-8") + body, hashlib.sha256,
+    ).hexdigest()
+    return api_client.post(
+        path, content=body,
+        headers={
+            "Authorization": f"Bearer {bearer}", "X-Signature": sig,
+            "X-Timestamp": ts, "Content-Type": "application/json",
+        },
+    )
+
+
+class TestAitmReviewResultWebhook:
+    BEARER = "aitm-review-bearer"
+    SECRET = "aitm-review-secret"
+
+    @pytest.fixture(autouse=True)
+    def _env(self, monkeypatch):
+        monkeypatch.setenv("AITM_REVIEW_WEBHOOK_BEARER", self.BEARER)
+        monkeypatch.setenv("AITM_REVIEW_WEBHOOK_SECRET", self.SECRET)
+
+    def _make_review_case(self, db_session, tenant_id, engagement, **overrides) -> ReviewCase:
+        defaults = dict(
+            tenant_id=tenant_id, case_no="CRM-Q-2026-0001",
+            review_type=ReviewType.PROVISIONAL, artifact_type=ArtifactType.QUOTE,
+            engagement_id=engagement.id, review_key_hash="deadbeef",
+            status="pending", revision=0,
+        )
+        defaults.update(overrides)
+        case = ReviewCase(**defaults)
+        db_session.add(case)
+        db_session.flush()
+        return case
+
+    def test_invalid_signature_is_rejected(self, api_client, db_session, tenant_id):
+        resp = _signed_post(
+            api_client, "/webhooks/aitm/review-result", {"case_no": "x", "revision": 1},
+            bearer=self.BEARER, secret="wrong-secret",
+        )
+        assert resp.status_code == 401
+
+    def test_clear_judgment_updates_review_case_without_action_item(
+        self, api_client, db_session, tenant_id,
+    ):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        case = self._make_review_case(db_session, tenant_id, engagement)
+        db_session.commit()
+
+        resp = _signed_post(
+            api_client, "/webhooks/aitm/review-result",
+            {"case_no": case.case_no, "revision": 1, "status": "clear",
+             "valid_until": (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()},
+            bearer=self.BEARER, secret=self.SECRET,
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "processed"}
+
+        db_session.refresh(case)
+        assert case.status == "clear"
+        assert case.revision == 1
+        assert case.decided_at is not None
         assert db_session.query(ActionItem).filter_by(
             tenant_id=tenant_id, engagement_id=engagement.id,
         ).count() == 0
+
+    def test_hit_judgment_creates_action_item(self, api_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        case = self._make_review_case(db_session, tenant_id, engagement)
+        db_session.commit()
+
+        resp = _signed_post(
+            api_client, "/webhooks/aitm/review-result",
+            {"case_no": case.case_no, "revision": 1, "status": "hit"},
+            bearer=self.BEARER, secret=self.SECRET,
+        )
+        assert resp.status_code == 200
+
+        db_session.refresh(case)
+        assert case.status == "hit"
+        action_item = db_session.query(ActionItem).filter_by(
+            tenant_id=tenant_id, engagement_id=engagement.id,
+        ).one()
+        assert action_item.assigned_to == "輸出管理チーム"
+        assert case.case_no in action_item.reason
+
+    def test_duplicate_event_is_a_no_op(self, api_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        case = self._make_review_case(db_session, tenant_id, engagement)
+        db_session.commit()
+
+        payload = {"case_no": case.case_no, "revision": 1, "status": "hit"}
+        first = _signed_post(
+            api_client, "/webhooks/aitm/review-result", payload,
+            bearer=self.BEARER, secret=self.SECRET,
+        )
+        second = _signed_post(
+            api_client, "/webhooks/aitm/review-result", payload,
+            bearer=self.BEARER, secret=self.SECRET,
+        )
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert second.json() == {"status": "duplicate"}
+        assert db_session.query(ActionItem).filter_by(
+            tenant_id=tenant_id, engagement_id=engagement.id,
+        ).count() == 1  # 2回目で重複起票されていない
+
+    def test_stale_revision_is_discarded(self, api_client, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        case = self._make_review_case(db_session, tenant_id, engagement, revision=5, status="clear")
+        db_session.commit()
+
+        resp = _signed_post(
+            api_client, "/webhooks/aitm/review-result",
+            {"case_no": case.case_no, "revision": 2, "status": "hit", "event_id": "stale-evt"},
+            bearer=self.BEARER, secret=self.SECRET,
+        )
+        assert resp.status_code == 200
+
+        db_session.refresh(case)
+        assert case.status == "clear"  # 古いrevisionは適用されない
+        assert case.revision == 5
+
+    def test_unknown_case_no_does_not_error(self, api_client, db_session, tenant_id):
+        resp = _signed_post(
+            api_client, "/webhooks/aitm/review-result",
+            {"case_no": "CRM-Q-9999", "revision": 1, "status": "hit", "event_id": "unknown-evt"},
+            bearer=self.BEARER, secret=self.SECRET,
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "processed"}

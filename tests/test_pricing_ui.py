@@ -176,6 +176,63 @@ class TestQuotesAndContracts:
         assert quote.status == "sent"
         assert quote.issued_at is not None
 
+    def test_create_quote_submits_review_case_for_mapped_product(
+        self, ui_client, db_session, tenant_id,
+    ):
+        from crm_mvp.models import ErpMaterial, ReviewCase
+
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        material = ErpMaterial(
+            tenant_id=tenant_id, material_code="MAT-0001", description="検査装置",
+            material_type="FERT", base_unit="PC", standard_price=Decimal("700000"),
+            currency="JPY",
+        )
+        db_session.add(material)
+        db_session.flush()
+        product = make_product(db_session, tenant_id, erp_material_id=material.id)
+        db_session.commit()
+
+        ui_client.post(
+            f"/ui/engagements/{engagement.id}/line-items",
+            data={"product_id": str(product.id), "quantity": "1", "discount_rate": "0"},
+        )
+        ui_client.post(f"/ui/engagements/{engagement.id}/quotes", data={})
+
+        from crm_mvp.models import Quote
+        quote = db_session.query(Quote).filter_by(engagement_id=engagement.id).one()
+        review_case = db_session.query(ReviewCase).filter_by(quote_id=quote.id).one()
+        assert review_case.status == "pending"
+
+        resp = ui_client.get(f"/ui/engagements/{engagement.id}")
+        assert "審査: pending" in resp.text
+
+    def test_create_quote_blocked_by_artifact_gate_policy(
+        self, ui_client, db_session, tenant_id,
+    ):
+        from crm_mvp.enums import ArtifactType, GateKind, GateStrength
+        from crm_mvp.models import GatePolicy, Quote
+
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        product = make_product(db_session, tenant_id)
+        db_session.add(GatePolicy(
+            tenant_id=tenant_id, code="artifact.quote", kind=GateKind.ARTIFACT,
+            artifact_type=ArtifactType.QUOTE, strength=GateStrength.BLOCK,
+            industry_template="manufacturing",
+            conditions={"compliance": [{"check_type": "anti_social", "must_be_fresh": True}]},
+        ))
+        db_session.commit()
+
+        ui_client.post(
+            f"/ui/engagements/{engagement.id}/line-items",
+            data={"product_id": str(product.id), "quantity": "1", "discount_rate": "0"},
+        )
+        resp = ui_client.post(
+            f"/ui/engagements/{engagement.id}/quotes", data={}, follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert "flash_type=error" in resp.headers["location"]
+        assert db_session.query(Quote).filter_by(engagement_id=engagement.id).count() == 0
+
     def test_create_contract_from_quote(self, ui_client, db_session, tenant_id):
         _, engagement = create_account_and_engagement(db_session, tenant_id)
         product = make_product(db_session, tenant_id)

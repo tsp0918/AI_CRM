@@ -35,6 +35,14 @@ class Quote(Base, UUIDPk, Timestamped, Provenance, TenantScoped):
     total_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
     currency: Mapped[str] = mapped_column(String(3), default="JPY")
 
+    # 輸出管理審査(CRM_連携引き継ぎ書.md §5.2)向け。ISO 3166-1 alpha-2。
+    destination_country: Mapped[str | None] = mapped_column(String(2))
+    # 未設定 = 契約相手(Engagement.account)と同一とみなす。異なる場合のみ設定。
+    end_user_account_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("account.id", ondelete="SET NULL")
+    )
+    end_use: Mapped[str | None] = mapped_column(Text)
+
 
 class QuoteLineItem(Base, UUIDPk, TenantScoped):
     __tablename__ = "quote_line_item"
@@ -83,6 +91,13 @@ class Contract(Base, UUIDPk, Timestamped, Provenance, TenantScoped):
     # 売上レポートは realized_amount があればそちらを優先する設計にして、
     # 同期が始まった時にレポート側の変更を不要にする。
     realized_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+
+    # 輸出管理審査(CRM_連携引き継ぎ書.md §5.2)向け。Quoteと同じ設計。
+    destination_country: Mapped[str | None] = mapped_column(String(2))
+    end_user_account_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("account.id", ondelete="SET NULL")
+    )
+    end_use: Mapped[str | None] = mapped_column(Text)
 
 
 class ContractLineItem(Base, UUIDPk, TenantScoped):

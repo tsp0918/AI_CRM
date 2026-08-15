@@ -9,9 +9,10 @@
 §6.2: 実運用では30秒間隔のポーリングを推奨(`--interval 30`)。`--interval`を
 省略すると1回処理して終了する(cron起動向け)。
 
-Phase 0時点では `register_dispatcher()` が何も登録されていないため、
-投入済みメッセージは全て `failed`(未登録kind)になる — Phase 1以降で
-実送信ロジックを登録する。
+起動時に `register_aitm_dispatchers()`(crm_mvp/services/review_case.py)を
+呼ぶ。`AITM_REVIEW_URL` が未設定ならdispatcherは登録されず、投入済みの
+`aitm.review.submit` メッセージは `failed`(未登録kind)のまま
+`/ui/integration-status` に表示される(意図的な安全側動作)。
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from crm_mvp.services.outbox import process_outbox
+from crm_mvp.services.review_case import register_aitm_dispatchers
 
 DEFAULT_DATABASE_URL = "postgresql+psycopg://crm_app@localhost:5432/crm_mvp"
 
@@ -48,6 +50,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    register_aitm_dispatchers()
     engine = create_engine(args.database_url)
 
     while True:
