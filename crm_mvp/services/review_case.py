@@ -291,3 +291,35 @@ def register_aitm_dispatchers() -> None:
     """
     if os.environ.get("AITM_REVIEW_URL"):
         register_dispatcher("aitm.review.submit", dispatch_aitm_review_submit)
+
+
+def check_review_clearance(
+    session: Session, tenant_id: uuid.UUID, *,
+    quote_id: uuid.UUID | None = None, contract_id: uuid.UUID | None = None,
+) -> str | None:
+    """見積送付・契約締結の前に呼ぶハード遮断チェック(Phase 1b)。
+
+    クリア済みなら None、未クリアならブロック理由(表示用メッセージ)を返す。
+    `ReviewCase`が存在しない場合(§5.4: 品目マッピング未設定で審査未起票)も
+    「未クリア」として扱う — 無審査のまま送付・締結させない安全側の判断。
+    `quote_id`/`contract_id`のどちらか一方を指定する。
+    """
+    stmt = select(ReviewCase).where(ReviewCase.tenant_id == tenant_id)
+    if quote_id is not None:
+        stmt = stmt.where(ReviewCase.quote_id == quote_id)
+    else:
+        stmt = stmt.where(ReviewCase.contract_id == contract_id)
+    review_case = session.execute(
+        stmt.order_by(ReviewCase.created_at.desc())
+    ).scalars().first()
+
+    if review_case is None:
+        return (
+            "輸出管理審査が未起票です"
+            "(品目マッピング未設定の可能性があります。ActionItemを確認してください)"
+        )
+    if review_case.status != ReviewCaseStatus.CLEAR:
+        return f"輸出管理審査が未クリアです(現在の状態: {review_case.status})"
+    if review_case.valid_until is not None and review_case.valid_until <= datetime.now(timezone.utc):
+        return "輸出管理審査の有効期限が切れています(再審査が必要です)"
+    return None

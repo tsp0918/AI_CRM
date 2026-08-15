@@ -33,7 +33,9 @@ from ...services.engagement_relationships import (
 )
 from ...services.artifact_gate import evaluate_artifact_gate
 from ...services.pricing import add_line_item, list_line_items, remove_line_item
-from ...services.review_case import submit_formal_review, submit_provisional_review
+from ...services.review_case import (
+    check_review_clearance, submit_formal_review, submit_provisional_review,
+)
 from ...services.sales_groups import list_sales_groups_tree_ordered
 from ...services.quoting import (
     create_contract, create_quote_from_engagement, list_contract_line_items,
@@ -735,7 +737,18 @@ def update_quote_status_ui(
     session: Session = Depends(get_ui_db_session),
 ) -> RedirectResponse:
     quote = _get_quote_or_404(session, ui_session, engagement_id, quote_id)
-    update_quote_status(quote, QuoteStatus(status))
+    new_status = QuoteStatus(status)
+
+    if new_status == QuoteStatus.SENT:
+        block_reason = check_review_clearance(
+            session, ui_session.tenant_id, quote_id=quote.id,
+        )
+        if block_reason is not None:
+            return redirect_with_flash(
+                f"/ui/engagements/{engagement_id}", block_reason, "error",
+            )
+
+    update_quote_status(quote, new_status)
     session.commit()
     return redirect_with_flash(f"/ui/engagements/{engagement_id}", f"見積もりを「{status}」にしました")
 
@@ -803,7 +816,18 @@ def update_contract_status_ui(
     ):
         raise HTTPException(status_code=404, detail="contract not found")
 
-    update_contract_status(contract, ContractStatus(status))
+    new_status = ContractStatus(status)
+
+    if new_status in (ContractStatus.SIGNED, ContractStatus.ACTIVE):
+        block_reason = check_review_clearance(
+            session, ui_session.tenant_id, contract_id=contract.id,
+        )
+        if block_reason is not None:
+            return redirect_with_flash(
+                f"/ui/engagements/{engagement_id}", block_reason, "error",
+            )
+
+    update_contract_status(contract, new_status)
     session.commit()
     return redirect_with_flash(f"/ui/engagements/{engagement_id}", f"契約を「{status}」にしました")
 

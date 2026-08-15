@@ -108,19 +108,23 @@ Phase 1へ意図的に先送り(コンシューマ不在のため)。C0-4はス�
 
 ### Phase 1 — 2段階審査とゲート制御
 
-**進捗(2026-08-15): Phase 1a(往復導線)実装済み・全テストgreen(604件、うち
-新規22件)。ハード遮断(C1-8/C1-9)・文書出力(C1-10)は意図的に未着手 —
-詳細は下表と実装計画の該当Plan(`services/review_case.py`等)参照。**
+**進捗(2026-08-15): Phase 1a(往復導線)+ Phase 1b(ハード遮断)実装済み・
+全テストgreen(614件、うち新規32件)。文書出力(C1-10)のみ意図的に未着手 —
+詳細は下表参照。**
 
 | ID | 追加注記 |
 |---|---|
 | C1-1 | 「新規カラム編集UI」ではなく「`Product`編集画面(`/ui/products`)に`erp_material_id`選択欄を追加」と読み替える。未マッピング一覧は`Product.erp_material_id IS NULL AND is_active`で抽出可能。**[未着手]** 既存の`/ui/products`編集フォームは`erp_material_id`選択欄自体は無いが、品目未マッピングは`submit_provisional_review`/`submit_formal_review`がActionItem起票で可視化する形で当面代替(Phase 1a完了分) |
 | C1-2〜C1-6相当 | AI_TMへの仮審査・正式審査の起票。**[完了]** `crm_mvp/services/review_case.py`(`build_review_key_hash`/`submit_provisional_review`/`submit_formal_review`/`dispatch_aitm_review_submit`)。Outbox経由(Phase 0基盤)で非同期送信、`ReviewCase`モデル新設(`crm_mvp/models/review_case.py`)。`Quote`/`Contract`に`destination_country`/`end_user_account_id`/`end_use`列を追加(旧C0-1相当、ここで初めて実消費者ができた) |
 | C1-7相当 | IF-10受信ハンドラ。**[完了]** `/webhooks/aitm/review-result`(`crm_mvp/api/webhooks.py`)。Phase 0で単体実装のみだった`verify_webhook`/`record_webhook_event`をここで初めて実ルートに接続。`revision`によるstale判定も実装済み |
-| C1-8 | `QuoteStatus.ISSUABLE`追加は§2.3参照。`quoting.py`の`update_quote_status()`にゲート判定を挟む変更が中心。**[Phase 1bへ先送り]** 往復導線(起票→受信→表示)の実績を見てから着手する判断(ハード遮断は業務を止める権限を持つため) |
-| C1-9 | `GateKind.EXPORT`/`GateKind.COMMERCE`は、既存`ComplianceCheckType`(`ANTI_SOCIAL`/`CREDIT`/`SANCTIONS`/`EXPORT_CONTROL`)から導出できないか検討する(§6の未決事項1)。**[Phase 1bへ先送り]** C1-8と同時着手が自然なため |
+| C1-8 | `QuoteStatus.ISSUABLE`追加は§2.3参照。**[完了・ただし設計を変更]** 新しい中間ステータスは追加せず、`crm_mvp/services/review_case.py`の`check_review_clearance()`を`update_quote_status_ui`/`update_contract_status_ui`(`crm_mvp/api/web/engagements.py`)に挟み、既存の`SENT`/`SIGNED`/`ACTIVE`遷移そのものをゲートする形にした。理由: `QuoteStatus.ISSUABLE`を追加すると`crm_mvp/api/web/quotes.py`の3つのハードコードされた並行マップ(`QUOTE_STATUS_LABELS`/`ORDER`/`BADGE`)や一覧テンプレートまで広範囲に手を入れる必要があり、同じ業務要件がもっと小さい変更で実現できたため |
+| C1-9 | `GateKind.EXPORT`/`GateKind.COMMERCE`は、既存`ComplianceCheckType`から導出できないか検討する(§6の未決事項1)。**[COMMERCE側は先送り、EXPORT側は完了]** ERP側(与信・反社)連携がまだ存在しないため、ブロックできるのはAI_TM(輸出)側の`ReviewCase`判定のみ。`GatePolicy`の汎用条件式化は過剰設計と判断し見送った — COMMERCE側はPhase 2でERP連携が入った時点で再検討 |
 | C1-10 | ドキュメント出力の既存実装箇所は未調査(現状PDF出力機能自体が無い可能性が高い)。**着手前に見積書/契約書の出力機能の現状有無を確認すること**(§6の未決事項2)。**[確認済み・未着手]** grepで確認した結果、PDF/文書出力機能は本コードベースに一切存在しない。それ自体が別途スコープすべき前提タスク |
 | (副産物) | `crm_mvp/services/artifact_gate.py`(ARTIFACT種別ゲート評価)を新設。`seed_policies.py`に元々投入済みだった`artifact.quote`/`artifact.contract`ポリシーが、評価関数の不在により完全に無効だったのを有効化した(Phase 1aのスコープには無かったが、`gate_engine.evaluate_gate()`が種別非依存で再利用可能だったため小さく含めた) |
+
+**既知の残課題(Phase 1bで意図的に先送り)**: (1) 有効期限切れ審査の能動的な
+`SENT→DRAFT`自動差し戻し(現状は送付操作時のその場チェックのみ)、(2) 未クリア
+審査の手動再起票UI(現状の回避策: 品目マッピング修正後に見積を作り直す)。
 
 ### Phase 2 — 取引先とエンドユーザー
 

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -12,7 +13,8 @@ from crm_mvp.models import ActionItem, ErpMaterial, OutboxMessage, Product, Revi
 from crm_mvp.services import pricing as pr
 from crm_mvp.services import quoting as qt
 from crm_mvp.services.review_case import (
-    build_review_key_hash, submit_formal_review, submit_provisional_review,
+    build_review_key_hash, check_review_clearance, submit_formal_review,
+    submit_provisional_review,
 )
 
 from .conftest import create_account_and_engagement
@@ -248,3 +250,108 @@ class TestSubmitFormalReview:
             tenant_id=tenant_id, engagement_id=engagement.id,
         ).one()
         assert "品目マッピング" in action_item.reason
+
+
+class TestCheckReviewClearance:
+    def _make_case(self, db_session, tenant_id, engagement, **overrides) -> ReviewCase:
+        defaults = dict(
+            tenant_id=tenant_id, case_no="CRM-Q-2026-0001",
+            review_type=ReviewType.PROVISIONAL, artifact_type=ArtifactType.QUOTE,
+            quote_id=None, engagement_id=engagement.id, review_key_hash="deadbeef",
+            status="pending",
+        )
+        defaults.update(overrides)
+        case = ReviewCase(**defaults)
+        db_session.add(case)
+        db_session.flush()
+        return case
+
+    def test_no_review_case_blocks(self, db_session, tenant_id):
+        reason = check_review_clearance(db_session, tenant_id, quote_id=uuid.uuid4())
+        assert reason is not None
+        assert "未起票" in reason
+
+    def test_pending_blocks(self, db_session, tenant_id):
+        from crm_mvp.models import Quote
+
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        quote = Quote(
+            tenant_id=tenant_id, engagement_id=engagement.id, quote_number="Q-2026-0095",
+            status="draft", total_amount=Decimal("0"), currency="JPY",
+        )
+        db_session.add(quote)
+        db_session.flush()
+        self._make_case(db_session, tenant_id, engagement, quote_id=quote.id, status="pending")
+
+        reason = check_review_clearance(db_session, tenant_id, quote_id=quote.id)
+        assert reason is not None
+        assert "未クリア" in reason
+
+    def test_hit_blocks(self, db_session, tenant_id):
+        from crm_mvp.models import Quote
+
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        quote = Quote(
+            tenant_id=tenant_id, engagement_id=engagement.id, quote_number="Q-2026-0099",
+            status="draft", total_amount=Decimal("0"), currency="JPY",
+        )
+        db_session.add(quote)
+        db_session.flush()
+        self._make_case(db_session, tenant_id, engagement, quote_id=quote.id, status="hit")
+
+        reason = check_review_clearance(db_session, tenant_id, quote_id=quote.id)
+        assert reason is not None
+        assert "未クリア" in reason
+
+    def test_expired_blocks(self, db_session, tenant_id):
+        from crm_mvp.models import Quote
+
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        quote = Quote(
+            tenant_id=tenant_id, engagement_id=engagement.id, quote_number="Q-2026-0098",
+            status="draft", total_amount=Decimal("0"), currency="JPY",
+        )
+        db_session.add(quote)
+        db_session.flush()
+        self._make_case(
+            db_session, tenant_id, engagement, quote_id=quote.id, status="clear",
+            valid_until=datetime.now(timezone.utc) - timedelta(days=1),
+        )
+
+        reason = check_review_clearance(db_session, tenant_id, quote_id=quote.id)
+        assert reason is not None
+        assert "有効期限" in reason
+
+    def test_clear_and_not_expired_allows(self, db_session, tenant_id):
+        from crm_mvp.models import Quote
+
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        quote = Quote(
+            tenant_id=tenant_id, engagement_id=engagement.id, quote_number="Q-2026-0097",
+            status="draft", total_amount=Decimal("0"), currency="JPY",
+        )
+        db_session.add(quote)
+        db_session.flush()
+        self._make_case(
+            db_session, tenant_id, engagement, quote_id=quote.id, status="clear",
+            valid_until=datetime.now(timezone.utc) + timedelta(days=30),
+        )
+
+        assert check_review_clearance(db_session, tenant_id, quote_id=quote.id) is None
+
+    def test_clear_with_no_expiry_allows(self, db_session, tenant_id):
+        from crm_mvp.models import Quote
+
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        quote = Quote(
+            tenant_id=tenant_id, engagement_id=engagement.id, quote_number="Q-2026-0096",
+            status="draft", total_amount=Decimal("0"), currency="JPY",
+        )
+        db_session.add(quote)
+        db_session.flush()
+        self._make_case(
+            db_session, tenant_id, engagement, quote_id=quote.id, status="clear",
+            valid_until=None,
+        )
+
+        assert check_review_clearance(db_session, tenant_id, quote_id=quote.id) is None

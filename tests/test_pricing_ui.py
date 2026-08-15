@@ -166,6 +166,19 @@ class TestQuotesAndContracts:
         quote = db_session.query(Quote).filter_by(engagement_id=engagement.id).one()
         assert quote.quote_number.startswith("Q-")
 
+        # Phase 1b: SENTへの遷移は審査クリアが前提(未マッピング品目のため
+        # ReviewCaseは起票されていない) — この試験の主眼(issued_atの記録)を
+        # 検証するため、審査クリア済みの状態を直接作る。
+        from crm_mvp.enums import ArtifactType, ReviewType
+        from crm_mvp.models import ReviewCase
+        db_session.add(ReviewCase(
+            tenant_id=tenant_id, case_no=f"CRM-{quote.quote_number}",
+            review_type=ReviewType.PROVISIONAL, artifact_type=ArtifactType.QUOTE,
+            quote_id=quote.id, engagement_id=engagement.id,
+            review_key_hash="test", status="clear",
+        ))
+        db_session.commit()
+
         resp = ui_client.post(
             f"/ui/engagements/{engagement.id}/quotes/{quote.id}/status",
             data={"status": "sent"},
@@ -258,6 +271,124 @@ class TestQuotesAndContracts:
         contract = db_session.query(Contract).filter_by(engagement_id=engagement.id).one()
         assert contract.contract_number.startswith("C-")
         assert contract.quote_id == quote.id
+
+    def test_send_quote_blocked_without_review_case(self, ui_client, db_session, tenant_id):
+        """Phase 1b: 未マッピング品目(ReviewCase無し)の見積はsentに変更できない。"""
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        product = make_product(db_session, tenant_id)  # erp_material_id 未設定
+        db_session.commit()
+
+        ui_client.post(
+            f"/ui/engagements/{engagement.id}/line-items",
+            data={"product_id": str(product.id), "quantity": "1", "discount_rate": "0"},
+        )
+        ui_client.post(f"/ui/engagements/{engagement.id}/quotes", data={})
+
+        from crm_mvp.models import Quote
+        quote = db_session.query(Quote).filter_by(engagement_id=engagement.id).one()
+
+        resp = ui_client.post(
+            f"/ui/engagements/{engagement.id}/quotes/{quote.id}/status",
+            data={"status": "sent"}, follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert "flash_type=error" in resp.headers["location"]
+        db_session.refresh(quote)
+        assert quote.status == "draft"
+
+    def test_send_quote_blocked_when_review_not_clear(self, ui_client, db_session, tenant_id):
+        from crm_mvp.enums import ArtifactType, ReviewType
+        from crm_mvp.models import Quote, ReviewCase
+
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        product = make_product(db_session, tenant_id)
+        db_session.commit()
+
+        ui_client.post(
+            f"/ui/engagements/{engagement.id}/line-items",
+            data={"product_id": str(product.id), "quantity": "1", "discount_rate": "0"},
+        )
+        ui_client.post(f"/ui/engagements/{engagement.id}/quotes", data={})
+        quote = db_session.query(Quote).filter_by(engagement_id=engagement.id).one()
+        db_session.add(ReviewCase(
+            tenant_id=tenant_id, case_no=f"CRM-{quote.quote_number}",
+            review_type=ReviewType.PROVISIONAL, artifact_type=ArtifactType.QUOTE,
+            quote_id=quote.id, engagement_id=engagement.id,
+            review_key_hash="test", status="hit",
+        ))
+        db_session.commit()
+
+        resp = ui_client.post(
+            f"/ui/engagements/{engagement.id}/quotes/{quote.id}/status",
+            data={"status": "sent"}, follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert "flash_type=error" in resp.headers["location"]
+        db_session.refresh(quote)
+        assert quote.status == "draft"
+
+    def test_sign_contract_blocked_without_review_case(self, ui_client, db_session, tenant_id):
+        from crm_mvp.models import Contract, Quote
+
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        product = make_product(db_session, tenant_id)
+        db_session.commit()
+
+        ui_client.post(
+            f"/ui/engagements/{engagement.id}/line-items",
+            data={"product_id": str(product.id), "quantity": "1", "discount_rate": "0"},
+        )
+        ui_client.post(f"/ui/engagements/{engagement.id}/quotes", data={})
+        quote = db_session.query(Quote).filter_by(engagement_id=engagement.id).one()
+        ui_client.post(
+            f"/ui/engagements/{engagement.id}/contracts", data={"quote_id": str(quote.id)},
+        )
+        contract = db_session.query(Contract).filter_by(engagement_id=engagement.id).one()
+
+        resp = ui_client.post(
+            f"/ui/engagements/{engagement.id}/contracts/{contract.id}/status",
+            data={"status": "signed"}, follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert "flash_type=error" in resp.headers["location"]
+        db_session.refresh(contract)
+        assert contract.status == "draft"
+
+    def test_sign_contract_succeeds_when_review_is_clear(self, ui_client, db_session, tenant_id):
+        from crm_mvp.enums import ArtifactType, ReviewType
+        from crm_mvp.models import Contract, Quote, ReviewCase
+
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        product = make_product(db_session, tenant_id)
+        db_session.commit()
+
+        ui_client.post(
+            f"/ui/engagements/{engagement.id}/line-items",
+            data={"product_id": str(product.id), "quantity": "1", "discount_rate": "0"},
+        )
+        ui_client.post(f"/ui/engagements/{engagement.id}/quotes", data={})
+        quote = db_session.query(Quote).filter_by(engagement_id=engagement.id).one()
+        ui_client.post(
+            f"/ui/engagements/{engagement.id}/contracts", data={"quote_id": str(quote.id)},
+        )
+        contract = db_session.query(Contract).filter_by(engagement_id=engagement.id).one()
+        db_session.add(ReviewCase(
+            tenant_id=tenant_id, case_no=f"CRM-{contract.contract_number}",
+            review_type=ReviewType.FORMAL, artifact_type=ArtifactType.CONTRACT,
+            contract_id=contract.id, engagement_id=engagement.id,
+            review_key_hash="test", status="clear",
+        ))
+        db_session.commit()
+
+        resp = ui_client.post(
+            f"/ui/engagements/{engagement.id}/contracts/{contract.id}/status",
+            data={"status": "signed"}, follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert "flash_type=error" not in resp.headers["location"]
+        db_session.refresh(contract)
+        assert contract.status == "signed"
+        assert contract.signed_at is not None
 
     def test_create_contract_without_line_items_fails(self, ui_client, db_session, tenant_id):
         _, engagement = create_account_and_engagement(db_session, tenant_id)
