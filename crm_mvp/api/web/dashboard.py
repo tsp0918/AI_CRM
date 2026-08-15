@@ -15,11 +15,13 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ...enums import Stage
-from ...models import Account, Engagement, WeeklyReview
+from ...enums import OutboxStatus, ReviewCaseStatus, Stage
+from ...models import (
+    Account, Contract, Engagement, OutboxMessage, ReviewCase, WeeklyReview,
+)
 from ...services.confidence_score import compute_confidence_score
 from ...services.engagement_relationships import list_renewal_candidates
 from ...services.stage_transitions import load_gate_context
@@ -42,7 +44,12 @@ def dashboard(
     ui_session: UiSession = Depends(require_ui_session),
     session: Session = Depends(get_ui_db_session),
 ) -> HTMLResponse:
-    query = select(Engagement).where(Engagement.tenant_id == ui_session.tenant_id)
+    query = select(Engagement).where(
+        Engagement.tenant_id == ui_session.tenant_id,
+        # R&D育成中(§7.5)は商談化承認前のため、通常のパイプラインから
+        # 除外する — 専用画面(/ui/rnd-opportunities)で扱う。
+        Engagement.exclude_from_pipeline.is_(False),
+    )
     if owner_user_id:
         query = query.where(Engagement.owner_user_id == uuid.UUID(owner_user_id))
     if not show_closed:
@@ -98,6 +105,31 @@ def dashboard(
     unworked_renewals = list_renewal_candidates(session, ui_session.tenant_id, within_days=90)
     overdue_renewals = [c for c in unworked_renewals if c.end_date <= date.today()]
 
+    # 連携状況サマリーカード(CRM_連携_実装計画.md C4-11)。
+    pending_review_count = session.execute(
+        select(func.count()).select_from(ReviewCase).where(
+            ReviewCase.tenant_id == ui_session.tenant_id,
+            ReviewCase.status == ReviewCaseStatus.PENDING,
+        )
+    ).scalar_one()
+    outbox_attention_count = session.execute(
+        select(func.count()).select_from(OutboxMessage).where(
+            OutboxMessage.tenant_id == ui_session.tenant_id,
+            OutboxMessage.status.in_([OutboxStatus.FAILED, OutboxStatus.DLQ]),
+        )
+    ).scalar_one()
+    rnd_incubation_count = session.execute(
+        select(func.count()).select_from(Engagement).where(
+            Engagement.tenant_id == ui_session.tenant_id,
+            Engagement.stage == Stage.RND_INCUBATION,
+        )
+    ).scalar_one()
+    monitoring_alert_count = session.execute(
+        select(func.count()).select_from(Contract).where(
+            Contract.tenant_id == ui_session.tenant_id, Contract.monitoring_alert.is_(True),
+        )
+    ).scalar_one()
+
     context = base_context(
         session, ui_session, active_nav="dashboard", request=request, flash=flash, flash_type=flash_type,
     )
@@ -108,5 +140,9 @@ def dashboard(
         "show_closed": show_closed,
         "unworked_renewal_count": len(unworked_renewals),
         "overdue_renewal_count": len(overdue_renewals),
+        "pending_review_count": pending_review_count,
+        "outbox_attention_count": outbox_attention_count,
+        "rnd_incubation_count": rnd_incubation_count,
+        "monitoring_alert_count": monitoring_alert_count,
     })
     return templates.TemplateResponse(request, "dashboard.html", context)

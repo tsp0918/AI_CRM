@@ -1,0 +1,36 @@
+{% extends "_base.html" %}
+
+{% block title %}R&D起点商談 | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<h1>R&D起点商談</h1>
+<p class="subtitle">
+  AI_TMのR&D連携(IF-14)から自動作成された商談です。パイプライン予実集計からは
+  除外されています。正式に商談化すると通常のパイプライン(引き合い)へ移行します。
+</p>
+
+{% if engagements %}
+<div class="card">
+  <table>
+    <thead><tr><th>案件名</th><th>取引先</th><th>R&Dケース番号</th><th>作成日</th><th></th></tr></thead>
+    <tbody>
+      {% for e in engagements %}
+      <tr>
+        <td>{{ e.name }}</td>
+        <td>{{ accounts_by_id.get(e.account_id).name if accounts_by_id.get(e.account_id) else "—" }}</td>
+        <td class="mono">{{ e.aitm_rnd_case_id or "—" }}</td>
+        <td class="mono" style="font-size:12px;">{{ e.created_at.strftime("%Y-%m-%d") }}</td>
+        <td>
+          <form method="post" action="/ui/rnd-opportunities/{{ e.id }}/promote" class="inline">
+            <button type="submit" class="btn btn-sm">商談化する</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card"><div class="empty-state">R&D起点の商談はまだありません。</div></div>
+{% endif %}
+{% endblock %}

@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from ...enums import SourceKind
 from ...models import Engagement, IngestionSource
 from ...ports.extractor import ExtractorPort
+from ...services.deemed_export import submit_deemed_export_event
 from ...services.ingestion_runner import process_source
 from ..deps import get_extractor
 from .common import base_context, redirect_with_flash
@@ -70,6 +71,8 @@ def source_new_submit(
     kind: str = Form(...),
     raw_text: str = Form(""),
     attendees: str = Form(""),
+    involves_technical_disclosure: bool = Form(False),
+    deemed_export_event_type: str = Form(""),
     ui_session: UiSession = Depends(require_ui_session),
     session: Session = Depends(get_ui_db_session),
     extractor: ExtractorPort = Depends(get_extractor),
@@ -88,9 +91,17 @@ def source_new_submit(
     source = IngestionSource(
         tenant_id=ui_session.tenant_id, engagement_id=eid,
         kind=SourceKind(kind), raw_text=raw_text,
+        involves_technical_disclosure=involves_technical_disclosure,
+        deemed_export_event_type=deemed_export_event_type.strip() or None,
     )
     session.add(source)
     session.flush()
+
+    # §6.7 IF-09: 技術情報の授受を含む活動はAI_TMへみなし輸出判定用に送る。
+    if involves_technical_disclosure:
+        submit_deemed_export_event(
+            session, ui_session.tenant_id, source, actor=f"human:{ui_session.actor_id}",
+        )
 
     speakers = _parse_attendees(attendees) if kind == SourceKind.CALENDAR_SYNC else None
 

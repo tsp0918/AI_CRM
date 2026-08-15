@@ -14,6 +14,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base, Provenance, TenantScoped, Timestamped, UUIDPk
@@ -98,6 +99,11 @@ class Contract(Base, UUIDPk, Timestamped, Provenance, TenantScoped):
         ForeignKey("account.id", ondelete="SET NULL")
     )
     end_use: Mapped[str | None] = mapped_column(Text)
+
+    # 継続監視アラート(CRM_連携引き継ぎ書.md §7.3 IF-16)。Trueの間は
+    # この契約からのrenewal商談起票をブロックする(engagement_relationships.py)。
+    monitoring_alert: Mapped[bool] = mapped_column(default=False)
+    monitoring_alert_detail: Mapped[dict | None] = mapped_column(JSONB)
 
 
 class ContractLineItem(Base, UUIDPk, TenantScoped):

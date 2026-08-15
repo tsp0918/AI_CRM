@@ -20,7 +20,7 @@ from ..enums import (
     ComplianceCheckType, ComplianceOutcome, ReviewCaseStatus, Stage,
     WebhookEventResult,
 )
-from ..models import Account, ComplianceStatus, Engagement, ReviewCase
+from ..models import Account, ComplianceStatus, Contract, Engagement, ReviewCase
 from ..services.action_items import create_manual_action_item
 from .deps import get_session, get_tenant_id, get_tenant_scoped_session
 from .webhook_security import record_webhook_event, verify_webhook
@@ -368,6 +368,162 @@ async def receive_aitm_party_event(
                     ),
                     assigned_by="system:aitm-party-webhook",
                 )
+
+    session.commit()
+    return {"status": "processed"}
+
+
+@router.post("/rnd-opportunity")
+async def receive_rnd_opportunity(
+    request: Request, session: Session = Depends(get_session),
+) -> dict:
+    """IF-14: R&D案件からの商談自動作成(§7.5)。専用ステージ
+    `Stage.RND_INCUBATION`に隔離し、パイプライン予実集計から除外する。
+    """
+    from ..services.rnd_opportunity import process_rnd_opportunity
+
+    ctx = await verify_webhook(
+        request, source="aitm", secret_env="AITM_RND_WEBHOOK_SECRET",
+        bearer_env="AITM_RND_WEBHOOK_BEARER",
+    )
+    session.execute(
+        text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
+        {"tenant_id": str(ctx.tenant_id)},
+    )
+
+    rnd_case_id = str(ctx.payload.get("rnd_case_id") or "")
+    event, is_new = record_webhook_event(
+        session, ctx.tenant_id, event_id=rnd_case_id or f"rnd:{datetime.now(timezone.utc).isoformat()}",
+        source_system="aitm", event_type="rnd.opportunity", payload=ctx.payload,
+    )
+    if not is_new:
+        session.commit()
+        return {"status": "duplicate"}
+
+    process_rnd_opportunity(session, ctx.tenant_id, ctx.payload)
+    session.commit()
+    return {"status": "processed"}
+
+
+@router.post("/deemed-export-risk")
+async def receive_deemed_export_risk(
+    request: Request, session: Session = Depends(get_session),
+) -> dict:
+    """IF-13: みなし輸出リスクの判定結果(§6.7・§7.3)。取引先に注意フラグを
+    立て、輸出管理部門への確認ActionItemを起票する。既存の`ComplianceStatus`
+    (`check_type=export_control`)を「みなし輸出注意」フラグの置き場として
+    再利用する — 新規のAccount列は追加しない。
+    """
+    ctx = await verify_webhook(
+        request, source="aitm", secret_env="AITM_DEEMED_EXPORT_WEBHOOK_SECRET",
+        bearer_env="AITM_DEEMED_EXPORT_WEBHOOK_BEARER",
+    )
+    session.execute(
+        text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
+        {"tenant_id": str(ctx.tenant_id)},
+    )
+
+    event_id = str(ctx.payload.get("event_id") or "")
+    event, is_new = record_webhook_event(
+        session, ctx.tenant_id, event_id=event_id or f"deemed-export:{datetime.now(timezone.utc).isoformat()}",
+        source_system="aitm", event_type="deemed_export.risk", payload=ctx.payload,
+    )
+    if not is_new:
+        session.commit()
+        return {"status": "duplicate"}
+
+    account = _resolve_party_account(session, ctx.tenant_id, ctx.payload)
+    if account is None:
+        event.result = WebhookEventResult.ERROR
+        event.error = "該当するAccountが見つかりません"
+        session.commit()
+        return {"status": "processed"}
+
+    now = datetime.now(timezone.utc)
+    status = session.execute(
+        select(ComplianceStatus).where(
+            ComplianceStatus.tenant_id == ctx.tenant_id,
+            ComplianceStatus.account_id == account.id,
+            ComplianceStatus.check_type == ComplianceCheckType.EXPORT_CONTROL,
+        )
+    ).scalar_one_or_none()
+    if status is None:
+        status = ComplianceStatus(
+            tenant_id=ctx.tenant_id, account_id=account.id,
+            check_type=ComplianceCheckType.EXPORT_CONTROL,
+        )
+        session.add(status)
+    status.outcome = ComplianceOutcome.NEEDS_REVIEW
+    status.provider = "aitm"
+    status.detail = ctx.payload.get("detail") or {}
+    status.checked_at = now
+    status.valid_until = now
+
+    engagements = session.execute(
+        select(Engagement).where(
+            Engagement.tenant_id == ctx.tenant_id, Engagement.account_id == account.id,
+            Engagement.stage.in_(NON_TERMINAL_STAGES),
+        )
+    ).scalars().all()
+    for engagement in engagements:
+        create_manual_action_item(
+            session, ctx.tenant_id, engagement.id, assigned_to=SANCTIONS_ACTION_ASSIGNEE,
+            task=(
+                f"みなし輸出リスク: 取引先「{account.name}」との技術情報授受に"
+                f"注意が必要です({ctx.payload.get('reason', '詳細はAI_TM側を確認')})。"
+            ),
+            assigned_by="system:aitm-deemed-export-webhook",
+        )
+
+    session.commit()
+    return {"status": "processed"}
+
+
+@router.post("/contract-monitoring")
+async def receive_contract_monitoring(
+    request: Request, session: Session = Depends(get_session),
+) -> dict:
+    """IF-16: 契約の継続監視アラート(§7.3)。`Contract.monitoring_alert`を
+    立てる — `create_child_engagement`(継続/Upsell/Cross-sell)がこれを見て
+    renewal商談の起票をブロックする。
+    """
+    ctx = await verify_webhook(
+        request, source="aitm", secret_env="AITM_MONITORING_WEBHOOK_SECRET",
+        bearer_env="AITM_MONITORING_WEBHOOK_BEARER",
+    )
+    session.execute(
+        text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
+        {"tenant_id": str(ctx.tenant_id)},
+    )
+
+    event_id = str(ctx.payload.get("event_id") or "")
+    event, is_new = record_webhook_event(
+        session, ctx.tenant_id, event_id=event_id or f"monitoring:{datetime.now(timezone.utc).isoformat()}",
+        source_system="aitm", event_type="contract.monitoring_alert", payload=ctx.payload,
+    )
+    if not is_new:
+        session.commit()
+        return {"status": "duplicate"}
+
+    contract_id = ctx.payload.get("crm_contract_id")
+    contract = session.get(Contract, uuid.UUID(contract_id)) if contract_id else None
+    if contract is None or contract.tenant_id != ctx.tenant_id:
+        event.result = WebhookEventResult.ERROR
+        event.error = "該当するContractが見つかりません"
+        session.commit()
+        return {"status": "processed"}
+
+    contract.monitoring_alert = True
+    contract.monitoring_alert_detail = ctx.payload.get("detail") or {}
+
+    create_manual_action_item(
+        session, ctx.tenant_id, contract.engagement_id, assigned_to=SANCTIONS_ACTION_ASSIGNEE,
+        task=(
+            f"契約 {contract.contract_number} に継続監視アラートが発生しました。"
+            "この契約からの更新商談の起票がブロックされます。内容を確認してください。"
+        ),
+        assigned_by="system:aitm-monitoring-webhook",
+    )
 
     session.commit()
     return {"status": "processed"}

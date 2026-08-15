@@ -6,6 +6,33 @@
 <h1>ダッシュボード</h1>
 <p class="subtitle">{{ rows | length }} 件の案件{% if not show_closed %}(進行中のみ表示中){% endif %}</p>
 
+<div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px;">
+  <a href="/ui/integration-status" style="flex:1; min-width:160px; text-decoration:none;">
+    <div class="card" style="margin-bottom:0; padding:12px 14px;">
+      <div class="muted" style="font-size:11px; text-transform:uppercase;">審査待ち</div>
+      <div style="font-size:22px; font-weight:700; color:{{ '#991b1b' if pending_review_count else '#166534' }};">{{ pending_review_count }}</div>
+    </div>
+  </a>
+  <a href="/ui/integration-status" style="flex:1; min-width:160px; text-decoration:none;">
+    <div class="card" style="margin-bottom:0; padding:12px 14px;">
+      <div class="muted" style="font-size:11px; text-transform:uppercase;">連携 要対応(failed/dlq)</div>
+      <div style="font-size:22px; font-weight:700; color:{{ '#991b1b' if outbox_attention_count else '#166534' }};">{{ outbox_attention_count }}</div>
+    </div>
+  </a>
+  <a href="/ui/rnd-opportunities" style="flex:1; min-width:160px; text-decoration:none;">
+    <div class="card" style="margin-bottom:0; padding:12px 14px;">
+      <div class="muted" style="font-size:11px; text-transform:uppercase;">R&D起点商談</div>
+      <div style="font-size:22px; font-weight:700; color:#374151;">{{ rnd_incubation_count }}</div>
+    </div>
+  </a>
+  <div style="flex:1; min-width:160px;">
+    <div class="card" style="margin-bottom:0; padding:12px 14px;">
+      <div class="muted" style="font-size:11px; text-transform:uppercase;">継続監視アラート契約</div>
+      <div style="font-size:22px; font-weight:700; color:{{ '#991b1b' if monitoring_alert_count else '#166534' }};">{{ monitoring_alert_count }}</div>
+    </div>
+  </div>
+</div>
+
 {% if unworked_renewal_count %}
 <div class="card" style="border-color:#a3711a; background:#f4ead4; margin-bottom:16px;">
   <p style="margin:0; color:#5b4310;">

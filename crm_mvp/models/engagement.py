@@ -64,6 +64,13 @@ class Engagement(Base, UUIDPk, Timestamped, TenantScoped):
     )
     relationship_type: Mapped[str | None] = mapped_column(String(20))
 
+    # AI_TMのR&D案件連携(IF-14, CRM_連携引き継ぎ書.md §7.5)。
+    # Stage.RND_INCUBATION の商談にのみ意味を持つ。
+    aitm_rnd_case_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    # 「まだ商談化していない開発案件」をパイプライン予実集計から除外する
+    # (§7.5運用上の注意)。商談化承認でLEADへ昇格する際にFalseへ戻す。
+    exclude_from_pipeline: Mapped[bool] = mapped_column(default=False)
+
     # 売上レポート集計用の営業組織タグ(2026-08-13)。owner(自由記述の担当者名)
     # とは独立 — 「誰が」ではなく「どの営業組織の実績か」を表す。
     sales_group_id: Mapped[uuid.UUID | None] = mapped_column(

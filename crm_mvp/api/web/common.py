@@ -23,6 +23,7 @@ STAGE_LABELS = {
     "lead": "引き合い", "prospect": "見込み", "qualified": "案件化",
     "proposal": "提案", "negotiation": "最終交渉",
     "closed_won": "受注", "closed_lost": "失注",
+    "rnd_incubation": "R&D育成中",
 }
 
 CRITERION_LABELS = {

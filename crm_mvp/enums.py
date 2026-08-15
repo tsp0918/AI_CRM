@@ -19,6 +19,12 @@ class Stage(StrEnum):
     CLOSED_WON = "closed_won"
     CLOSED_LOST = "closed_lost"
 
+    # AI_TM(R&D案件連携, IF-14)からの自動起票専用の隔離ステージ
+    # (CRM_連携引き継ぎ書.md §7.5)。STAGE_ORDER(stage_transitions.py)には
+    # 意図的に含めない — 通常のゲート付き遷移では出入りしない。商談化の
+    # 承認を経て明示的にLEADへ昇格させる別経路(promote_rnd_engagement)を通る。
+    RND_INCUBATION = "rnd_incubation"
+
 
 class Confidence(StrEnum):
     """証拠強度。AI は CORROBORATED までしか昇格させられない。"""
@@ -321,6 +327,24 @@ class OutboxResult(StrEnum):
     SENT = "sent"
     RETRY = "retry"
     FAILED_NO_RETRY = "failed_no_retry"
+
+
+class LicenseAllocationStatus(StrEnum):
+    """輸出許可証の枠照会・仮引当の状態(CRM_連携引き継ぎ書.md §6.5)。"""
+
+    PENDING = "pending"       # 照会/引当をOutboxに投入済み、応答待ち
+    CHECKED = "checked"       # IF-06残枠照会が完了(警告の有無を問わない)
+    ALLOCATED = "allocated"   # IF-07で仮引当済み
+    RELEASED = "released"     # キャンセル・失注で解放済み
+
+
+class DeemedExportEventType(StrEnum):
+    """みなし輸出に該当しうる活動の種別(CRM_連携引き継ぎ書.md §6.7)。"""
+
+    TECHNICAL_DOCUMENT_SHARED = "technical_document_shared"
+    SAMPLE_PROVIDED = "sample_provided"
+    TECHNICAL_MEETING = "technical_meeting"
+    FACILITY_TOUR = "facility_tour"
 
 
 class ReviewType(StrEnum):

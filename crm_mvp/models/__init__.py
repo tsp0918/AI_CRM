@@ -18,6 +18,7 @@ from .report_snapshot import ReportSnapshot
 from .integration import OutboxMessage, WebhookEvent
 from .review_case import ReviewCase
 from .fulfillment import ContractFulfillment
+from .license import LicenseAllocation
 
 __all__ = [
     "Account", "Contact", "ComplianceStatus",
@@ -36,4 +37,5 @@ __all__ = [
     "OutboxMessage", "WebhookEvent",
     "ReviewCase",
     "ContractFulfillment",
+    "LicenseAllocation",
 ]

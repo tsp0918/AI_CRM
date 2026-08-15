@@ -47,6 +47,28 @@
       </p>
     </div>
 
+    <div style="margin: 4px 0 14px; padding: 10px; border: 1px solid #e5e7eb; border-radius: 6px;">
+      <label style="display:flex; align-items:center; gap:6px; margin-bottom:8px;">
+        <input type="checkbox" id="involves_technical_disclosure" name="involves_technical_disclosure"
+               value="true" style="width:auto;"
+               onchange="document.getElementById('deemed-export-field').style.display = this.checked ? 'block' : 'none';">
+        <span style="font-weight:600; font-size:13px;">技術情報の授受を含む(みなし輸出の可能性)</span>
+      </label>
+      <div id="deemed-export-field" style="display:none;">
+        <label for="deemed_export_event_type" style="font-size:12px;">該当する活動</label>
+        <select id="deemed_export_event_type" name="deemed_export_event_type" style="margin-bottom:4px;">
+          <option value="technical_document_shared">技術資料・仕様書の共有</option>
+          <option value="sample_provided">サンプル提供</option>
+          <option value="technical_meeting">技術打合せ(相手方参加者を含む)</option>
+          <option value="facility_tour">工場見学・ラボツアー</option>
+        </select>
+        <p class="muted" style="font-size:11px; margin:0;">
+          外国籍の人物・外国法人への技術情報の提供・開示は輸出管理上「輸出」とみなされます。
+          該当する場合はチェックしてください — AI_TMへ判定用のイベントとして送信されます。
+        </p>
+      </div>
+    </div>
+
     <button type="submit" class="btn">投入して処理する</button>
   </form>
 </div>

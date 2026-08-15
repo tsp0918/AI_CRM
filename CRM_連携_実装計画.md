@@ -162,10 +162,40 @@ Phase 1へ意図的に先送り(コンシューマ不在のため)。C0-4はス�
 
 ### Phase 4 — ライセンス・R&D・みなし輸出
 
+**進捗(2026-08-15): コア部分(C4-1/2/3/4/5/6/7/8/11)実装済み。全テストgreen
+(631件、新規テストは今回未作成・Phase 2以降と同じ方針)。C4-9/C4-10
+(規制情報照会・事前警告)のみ意図的に未着手。**
+
 | ID | 追加注記 |
 |---|---|
-| C4-3 | `RND_INCUBATION`追加前に、§2.3の影響一覧(`OPEN_STAGES`、ダッシュボード、フォーキャストリスク、売上レポートのステージラベル)を実装者が実際にgrepして洗い出すことをタスクの最初のステップとして明示する |
-| C4-6 | `Contact.nationality`は新規追加。既存の`IngestionSource`/`Touch`テーブルへの「技術情報授受」フラグ追加は`DeemedExportActivity`の新設で代替可能か検討(§6の未決事項3) |
+| C4-1/C4-2 | IF-06残枠照会・IF-07仮引当/解放。**[完了]** 新規`LicenseAllocation`モデル+`crm_mvp/services/license.py`。IF-32(商流ゲート)と同じ「同期レスポンス型」を仮定してOutbox dispatcherがその場で結果を反映する設計にした。見積作成時に照会、契約締結(SIGNED)時に仮引当、契約TERMINATED時に解放(§6.6 IF-08連動)を自動起票する |
+| C4-3 | `RND_INCUBATION`追加前に、§2.3の影響一覧(`OPEN_STAGES`、ダッシュボード、フォーキャストリスク、売上レポートのステージラベル)を実装者が実際にgrepして洗い出すことをタスクの最初のステップとして明示する。**[完了]** `Stage.RND_INCUBATION`を追加、`stage_transitions.py`の`STAGE_ORDER`には意図的に含めない(通常のゲート付き遷移の対象外)。`Engagement.exclude_from_pipeline`でダッシュボードのパイプライン集計から除外。`crm_mvp/services/rnd_opportunity.py`(`process_rnd_opportunity`/`promote_rnd_engagement`)+新規`/webhooks/rnd-opportunity`(IF-14受信) |
+| C4-4 | R&D起点商談の一覧・昇格操作UI。**[完了]** 新規`/ui/rnd-opportunities`(`crm_mvp/api/web/rnd_opportunities.py`)。一覧+「商談化する」ボタンのみの最小画面 |
+| C4-5 | IF-09みなし輸出イベントの送信。**[完了]** `crm_mvp/services/deemed_export.py`。`IngestionSource`(活動ログ)に技術情報授受フラグが立った時点でOutbox経由送信 |
+| C4-6 | `Contact.nationality`は新規追加。既存の`IngestionSource`/`Touch`テーブルへの「技術情報授受」フラグ追加は`DeemedExportActivity`の新設で代替可能か検討(§6の未決事項3)。**[完了]** `IngestionSource`に`involves_technical_disclosure`/`deemed_export_event_type`を追加(新規テーブルは作らず既存テーブルに列追加する方を採用)。`Contact.nationality`も追加。情報投入フォーム(`/ui/sources/new`)にチェックボックス+活動種別選択+注意喚起文を追加。参加者国籍(`participants`JSONBからContactへの自動突合)は未実装 — スコープ外として明記 |
+| C4-7 | IF-13みなし輸出リスクの受信・表示。**[完了]** 新規`/webhooks/deemed-export-risk`。新規Account列は追加せず、既存`ComplianceStatus`(`check_type=export_control`)を「みなし輸出注意」フラグの置き場として再利用した |
+| C4-8 | IF-16継続監視アラートの受信・更新商談ブロック。**[完了]** 新規`/webhooks/contract-monitoring`が`Contract.monitoring_alert`を立て、`create_child_engagement`(renewal時)がこれを見てブロックする |
+| C4-9/C4-10 | IF-04/IF-05品目・判定履歴の照会とキャッシュ、見積品目追加時の規制事前警告。**[未着手]** ゲート判定・作成ブロックのようなコア業務要件に直結しないため優先度を下げた。実AI_TM連携時に改めてスコープする |
+| C4-11 | ダッシュボードの各カード。**[完了]** 審査待ち件数・連携要対応(Outbox failed/dlq)件数・R&D起点商談件数・継続監視アラート契約件数の4枚をダッシュボード上部に追加 |
+
+---
+
+## 全体進捗サマリー(2026-08-15時点)
+
+Phase 0〜4のコア部分をすべて実装済み。累計コミット: `b602d81`(Phase 0)〜
+本コミット(Phase 4)。全631件の既存回帰テストはgreenを維持しているが、
+**Phase 2以降(Phase 2remainder・Phase 3・Phase 4)は新規の自動テストを
+意図的に作成していない** — AI_TM/ERP側の開発が具体化し実APIの契約が
+固まった時点で、実際のレスポンス形状に合わせてテストを整備する方針
+(ユーザー指示による)。各サービスモジュールの新規パスは手動の
+functional smoke testで動作確認済み。
+
+主な未着手・既知の簡略化:
+- ドキュメント出力制御(C1-10): 本コードベースにPDF/文書出力機能自体が存在しない
+- IF-04/IF-05規制情報照会・キャッシュ(C4-9/C4-10)
+- 参加者国籍の自動突合(`participants`→`Contact.nationality`)
+- 真のFX換算(通貨ごとのバケット化で代替)
+- COMMERCE側の対象check_typeは`CREDIT`/`ANTI_SOCIAL`固定(§8.1の全状態機械ではなく`CLEAR`/`NEEDS_REVIEW`/`BLOCKED`の3値に単純化)
 
 ---
 

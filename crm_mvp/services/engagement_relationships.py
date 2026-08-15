@@ -52,6 +52,21 @@ def create_child_engagement(
         if party_block_reason is not None:
             raise ValueError(party_block_reason)
 
+    if relationship_type == EngagementRelationshipType.RENEWAL:
+        # §7.3 IF-16: 継続監視アラートが立っている契約からの更新商談起票を
+        # ブロックする。
+        alerted = session.execute(
+            select(Contract).where(
+                Contract.tenant_id == tenant_id, Contract.engagement_id == parent.id,
+                Contract.monitoring_alert.is_(True),
+            )
+        ).scalars().first()
+        if alerted is not None:
+            raise ValueError(
+                f"契約 {alerted.contract_number} に継続監視アラートが発生しているため、"
+                "更新商談を起票できません"
+            )
+
     child = Engagement(
         tenant_id=tenant_id, account_id=parent.account_id, name=name.strip(),
         stage=Stage.LEAD, owner=owner,

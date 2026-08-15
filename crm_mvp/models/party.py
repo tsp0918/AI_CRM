@@ -76,6 +76,10 @@ class Contact(Base, UUIDPk, Timestamped, TenantScoped):
     email: Mapped[str | None] = mapped_column(String(255), index=True)
     left_company_at: Mapped[date | None] = mapped_column(Date)
 
+    # みなし輸出判定(CRM_連携引き継ぎ書.md §6.7)向け。ISO 3166-1 alpha-2。
+    # 「相手方参加者の国籍・所属を記録できるようにする」という要件に対応。
+    nationality: Mapped[str | None] = mapped_column(String(2))
+
     account: Mapped[Account] = relationship(back_populates="contacts")
 
 

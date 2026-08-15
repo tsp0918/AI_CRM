@@ -11,8 +11,8 @@ from fastapi import APIRouter
 from . import (
     accounts, campaigns, dashboard, engagements, erp_business_partners,
     erp_materials, forecast_risk, graph, integration_status, leads, products,
-    proposals, quotes, renewals, report_snapshots, reports, sales_groups,
-    sequences, sources, users, workspace,
+    proposals, quotes, renewals, report_snapshots, reports, rnd_opportunities,
+    sales_groups, sequences, sources, users, workspace,
 )
 from .session import WorkspaceRequired
 
@@ -38,5 +38,6 @@ router.include_router(reports.router)
 router.include_router(report_snapshots.router)
 router.include_router(users.router)
 router.include_router(integration_status.router)
+router.include_router(rnd_opportunities.router)
 
 __all__ = ["router", "WorkspaceRequired"]

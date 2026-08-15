@@ -53,6 +53,11 @@ class IngestionSource(Base, UUIDPk, Timestamped, TenantScoped):
 
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     processing_error: Mapped[str | None] = mapped_column(Text)
+
+    # みなし輸出判定(CRM_連携引き継ぎ書.md §6.7 IF-09)向け。技術情報の
+    # 授受を含む活動かどうかのフラグと種別。含まない場合はFalse/None。
+    involves_technical_disclosure: Mapped[bool] = mapped_column(Boolean, default=False)
+    deemed_export_event_type: Mapped[str | None] = mapped_column(String(32))
     # 抽出に使ったモデルとプロンプト版。再現性のために必須。
     extractor_version: Mapped[str | None] = mapped_column(String(64))
 

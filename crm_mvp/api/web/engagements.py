@@ -37,6 +37,9 @@ from ...services.commerce_check import submit_commerce_check
 from ...services.compliance_screening import ensure_account_screened
 from ...services.erp_transcription import submit_contract_transcription
 from ...services.fulfillment import compute_fulfillment_summary
+from ...services.license import (
+    submit_license_allocation, submit_license_release, submit_quota_check,
+)
 from ...services.party_compliance import (
     check_commerce_clearance, check_party_clearance, worst_compliance_outcome,
 )
@@ -779,6 +782,12 @@ def create_quote_ui(
         session, ui_session.tenant_id, quote, engagement,
         actor=f"human:{ui_session.actor_id}",
     )
+    # §6.5: 見積段階での残枠照会(IF-06)。出荷段階で不足が発覚すると
+    # 新規許可申請に数週間〜数か月かかるため、見積の時点で警告する。
+    submit_quota_check(
+        session, ui_session.tenant_id, quote, engagement,
+        actor=f"human:{ui_session.actor_id}",
+    )
 
     session.commit()
     return redirect_with_flash(
@@ -931,6 +940,17 @@ def update_contract_status_ui(
         submit_contract_transcription(
             session, ui_session.tenant_id, contract, engagement,
             actor=f"human:{ui_session.actor_id}",
+        )
+        # §6.5 IF-07: 締結のタイミングで枠を仮引当する。
+        submit_license_allocation(
+            session, ui_session.tenant_id, contract, engagement,
+            actor=f"human:{ui_session.actor_id}",
+        )
+
+    if new_status == ContractStatus.TERMINATED:
+        # §6.6 IF-08連動: 契約キャンセルでライセンス仮引当を解放する。
+        submit_license_release(
+            session, ui_session.tenant_id, contract, actor=f"human:{ui_session.actor_id}",
         )
 
     session.commit()
