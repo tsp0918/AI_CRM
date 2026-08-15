@@ -295,3 +295,29 @@ class EngagementRelationshipType(StrEnum):
     RENEWAL = "renewal"           # 契約更新(同一商品構成での継続)
     UPSELL = "upsell"             # 既存契約の増量・上位グレード化
     CROSS_SELL = "cross_sell"     # 別カテゴリの商品の追加販売
+
+
+class OutboxStatus(StrEnum):
+    """外部システム(ERP/AI_TM)への送信保証キュー(CRM_連携引き継ぎ書.md §4.4)の状態。"""
+
+    PENDING = "pending"
+    SENT = "sent"
+    FAILED = "failed"
+    DLQ = "dlq"           # 全リトライ失敗、手動再送待ち
+
+
+class WebhookEventResult(StrEnum):
+    """外部システムからのWebhook受信の処理結果(冪等性の記録用)。"""
+
+    PROCESSED = "processed"
+    DUPLICATE = "duplicate"   # 同一event_idを再受信(正常系、何もしない)
+    STALE = "stale"           # revisionが現在値以下(古いイベント、破棄)
+    ERROR = "error"
+
+
+class OutboxResult(StrEnum):
+    """dispatcher(Outboxの送信関数)がprocess_outboxに返す処理結果。"""
+
+    SENT = "sent"
+    RETRY = "retry"
+    FAILED_NO_RETRY = "failed_no_retry"

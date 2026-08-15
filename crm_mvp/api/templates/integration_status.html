@@ -1,0 +1,111 @@
+{% extends "_base.html" %}
+
+{% block title %}連携ステータス | Compliance-aware Agentic CRM{% endblock %}
+
+{% block content %}
+<h1>連携ステータス(ERP / AI_TM)</h1>
+<p class="subtitle">
+  外部システムへの送信保証キュー(Outbox)と、外部システムからの受信履歴(Webhook)の状態を確認します。
+  Phase 0時点では実送信ロジック(dispatcher)が未登録のため、投入したメッセージは自動的に失敗扱いになります —
+  Phase 1以降で実際の送信先が接続されます。
+</p>
+
+<div class="card">
+  <h2>Outbox 件数サマリ</h2>
+  <div style="display:flex; gap:10px; flex-wrap:wrap;">
+    <span class="badge badge-outbox-pending">pending: {{ outbox_counts.get("pending", 0) }}</span>
+    <span class="badge badge-outbox-sent">sent: {{ outbox_counts.get("sent", 0) }}</span>
+    <span class="badge badge-outbox-failed">failed: {{ outbox_counts.get("failed", 0) }}</span>
+    <span class="badge badge-outbox-dlq">dlq: {{ outbox_counts.get("dlq", 0) }}</span>
+  </div>
+</div>
+
+<div class="card">
+  <h2>テストメッセージを登録する</h2>
+  <p class="subtitle" style="margin-bottom:10px;">
+    Outboxの一生(pending → 処理 → sent/failed/dlq)を目視確認するための投入フォームです。
+  </p>
+  <form method="post" action="/ui/integration-status/test-message">
+    <div class="field-row">
+      <div>
+        <label for="target_system">送信先</label>
+        <select id="target_system" name="target_system" required>
+          <option value="aitm">aitm(AI Trade Management)</option>
+          <option value="erp">erp</option>
+        </select>
+      </div>
+      <div>
+        <label for="kind">kind</label>
+        <input type="text" id="kind" name="kind" required placeholder="例: test.ping">
+      </div>
+    </div>
+    <label for="payload_json">payload(JSON)</label>
+    <textarea id="payload_json" name="payload_json" placeholder="{}">{}</textarea>
+    <button type="submit" class="btn btn-sm">Outboxに登録する</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Outbox メッセージ(直近50件)</h2>
+  {% if outbox_messages %}
+  <table>
+    <thead>
+      <tr>
+        <th>送信先</th><th>kind</th><th>状態</th><th>試行回数</th>
+        <th>次回試行</th><th>登録日時</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for m in outbox_messages %}
+      <tr>
+        <td class="mono">{{ m.target_system }}</td>
+        <td class="mono">{{ m.kind }}</td>
+        <td><span class="badge badge-outbox-{{ m.status }}">{{ m.status }}</span></td>
+        <td>{{ m.attempt_count }}</td>
+        <td class="mono">{{ m.next_attempt_at.strftime("%Y-%m-%d %H:%M") if m.next_attempt_at else "—" }}</td>
+        <td class="mono">{{ m.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+        <td>
+          {% if m.status in ("failed", "dlq") %}
+          <form class="inline" method="post" action="/ui/integration-status/{{ m.id }}/requeue">
+            <button type="submit" class="btn btn-sm btn-secondary">再送する</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% if m.last_error %}
+      <tr><td colspan="7" class="quote-box">{{ m.last_error }}</td></tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">まだOutboxメッセージがありません。</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Webhook 受信履歴(直近50件)</h2>
+  {% if webhook_events %}
+  <table>
+    <thead>
+      <tr>
+        <th>送信元</th><th>event_type</th><th>event_id</th><th>結果</th><th>受信日時</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in webhook_events %}
+      <tr>
+        <td class="mono">{{ e.source_system }}</td>
+        <td class="mono">{{ e.event_type }}</td>
+        <td class="mono">{{ e.event_id }}</td>
+        <td><span class="badge badge-webhook-{{ e.result }}">{{ e.result }}</span></td>
+        <td class="mono">{{ e.received_at.strftime("%Y-%m-%d %H:%M") }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">まだWebhook受信履歴がありません。</div>
+  {% endif %}
+</div>
+{% endblock %}

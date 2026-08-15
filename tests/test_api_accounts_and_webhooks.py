@@ -7,7 +7,7 @@ from __future__ import annotations
 import uuid
 
 from crm_mvp.enums import ComplianceCheckType, ComplianceOutcome, Stage
-from crm_mvp.models import Account, ComplianceStatus
+from crm_mvp.models import Account, ActionItem, ComplianceStatus
 
 from .conftest import create_account_and_engagement
 
@@ -81,7 +81,7 @@ class TestComplianceJudgmentWebhook:
 
 
 class TestSanctionsListUpdatedWebhook:
-    def test_flags_account_and_lists_affected_engagements(
+    def test_flags_account_and_creates_action_item_for_open_engagement(
         self, api_client, db_session, tenant_id,
     ):
         account, engagement = create_account_and_engagement(
@@ -97,8 +97,9 @@ class TestSanctionsListUpdatedWebhook:
         })
         assert resp.status_code == 200
         body = resp.json()
-        assert body["affected_accounts"] == 1
-        assert str(engagement.id) in body["affected_engagements"]
+        # レスポンスには業務データ(対象アカウント・商談等)を含めない —
+        # 通知はActionItemとしてCRM側に永続化する(webhooks.py参照)。
+        assert body == {"status": "processed", "hits_processed": 1}
 
         status = db_session.query(ComplianceStatus).filter_by(
             tenant_id=tenant_id, account_id=account.id,
@@ -106,7 +107,14 @@ class TestSanctionsListUpdatedWebhook:
         ).one()
         assert status.outcome == ComplianceOutcome.HIT
 
-    def test_closed_engagements_are_not_reported_as_affected(
+        action_item = db_session.query(ActionItem).filter_by(
+            tenant_id=tenant_id, engagement_id=engagement.id,
+        ).one()
+        assert action_item.assigned_to == "輸出管理チーム"
+        assert "テスト株式会社" in action_item.reason
+        assert action_item.written_by == "system:sanctions-webhook"
+
+    def test_closed_engagements_do_not_get_an_action_item(
         self, api_client, db_session, tenant_id,
     ):
         account, engagement = create_account_and_engagement(
@@ -121,4 +129,8 @@ class TestSanctionsListUpdatedWebhook:
             }],
         })
         assert resp.status_code == 200
-        assert resp.json()["affected_engagements"] == []
+        assert resp.json() == {"status": "processed", "hits_processed": 1}
+
+        assert db_session.query(ActionItem).filter_by(
+            tenant_id=tenant_id, engagement_id=engagement.id,
+        ).count() == 0

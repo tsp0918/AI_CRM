@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from ..enums import ComplianceCheckType, ComplianceOutcome, Stage
 from ..models import Account, ComplianceStatus, Engagement
+from ..services.action_items import create_manual_action_item
 from .deps import get_tenant_id, get_tenant_scoped_session
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -74,9 +75,17 @@ class SanctionsListUpdatedPayload(BaseModel):
     hits: list[SanctionsHit]
 
 
-class ReevaluationOut(BaseModel):
-    affected_accounts: int
-    affected_engagements: list[uuid.UUID]
+class WebhookReceiptOut(BaseModel):
+    """受理のみを返す。業務データ(対象アカウント・商談等)は含めない —
+    2026-08-15: CRM_連携引き継ぎ書.md §7.2「Webhookのレスポンスに業務
+    データを載せないこと」に合わせた変更。以前はaffected_engagements
+    をレスポンスで返していたが、リトライ時に副作用が読めなくなる
+    (呼び出し側がレスポンスを再利用できない)ため、通知はActionItem
+    としてCRM側に永続化する形に変更した(下記SANCTIONS_ACTION_ASSIGNEE
+    参照)。"""
+
+    status: str = "processed"
+    hits_processed: int
 
 
 NON_TERMINAL_STAGES = [
@@ -84,21 +93,22 @@ NON_TERMINAL_STAGES = [
     Stage.NEGOTIATION,
 ]
 
+SANCTIONS_ACTION_ASSIGNEE = "輸出管理チーム"
 
-@router.post("/sanctions-list-updated", response_model=ReevaluationOut)
+
+@router.post("/sanctions-list-updated", response_model=WebhookReceiptOut)
 def receive_sanctions_list_update(
     body: SanctionsListUpdatedPayload,
     tenant_id: uuid.UUID = Depends(get_tenant_id),
     session: Session = Depends(get_tenant_scoped_session),
-) -> ReevaluationOut:
+) -> WebhookReceiptOut:
     """制裁リスト更新時の遡及再評価(HANDOVER.md §5 item21)。
 
     ヒットしたアカウントの ComplianceStatus を HIT に更新し、進行中
-    (CLOSED_* でない)の Engagement を洗い出す。実際の通知チャネル
-    (メール/Slack 等)への連携は本 MVP のスコープ外 — 呼び出し側が
-    affected_engagements を使って任意の通知手段に繋ぐ想定。
+    (CLOSED_* でない)の Engagement ごとに ActionItem を起票する。
+    レスポンスには業務データを含めない(WebhookReceiptOut参照) — 「誰が
+    見ても分かる形」の通知はActionItemとして画面上に残す。
     """
-    affected_engagement_ids: list[uuid.UUID] = []
     now = datetime.now(timezone.utc)
 
     for hit in body.hits:
@@ -135,10 +145,17 @@ def receive_sanctions_list_update(
                 Engagement.stage.in_(NON_TERMINAL_STAGES),
             )
         ).scalars().all()
-        affected_engagement_ids.extend(e.id for e in engagements)
+        for engagement in engagements:
+            create_manual_action_item(
+                session, tenant_id, engagement.id,
+                assigned_to=SANCTIONS_ACTION_ASSIGNEE,
+                task=(
+                    f"制裁リスト更新: {hit.matched_entity_name}"
+                    f"({hit.matched_list})への該当が検知されました。"
+                    "取引先・商談の取り扱いを確認してください。"
+                ),
+                assigned_by="system:sanctions-webhook",
+            )
 
     session.commit()
-    return ReevaluationOut(
-        affected_accounts=len(body.hits),
-        affected_engagements=affected_engagement_ids,
-    )
+    return WebhookReceiptOut(hits_processed=len(body.hits))

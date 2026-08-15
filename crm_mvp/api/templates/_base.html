@@ -176,6 +176,15 @@
     .badge-gate-warn { background: #fef3c7; color: #92400e; }
     .badge-gate-block { background: #fee2e2; color: #991b1b; }
 
+    .badge-outbox-pending { background: #eff6ff; color: #1e40af; }
+    .badge-outbox-sent { background: #dcfce7; color: #166534; }
+    .badge-outbox-failed { background: #fee2e2; color: #991b1b; }
+    .badge-outbox-dlq { background: #fecaca; color: #7f1d1d; }
+    .badge-webhook-processed { background: #dcfce7; color: #166534; }
+    .badge-webhook-duplicate { background: #f3f4f6; color: #4b5563; }
+    .badge-webhook-stale { background: #fef3c7; color: #92400e; }
+    .badge-webhook-error { background: #fee2e2; color: #991b1b; }
+
     .th-hint {
       display: inline-block; margin-left: 3px; width: 13px; height: 13px; line-height: 13px;
       border-radius: 50%; background: #d1d5db; color: white; font-size: 9px; text-align: center;
@@ -373,6 +382,9 @@
       <a href="/ui/sales-groups" class="{% if active_nav == 'sales_groups' %}active{% endif %}">セールスグループ</a>
       <a href="/ui/users" class="{% if active_nav == 'users' %}active{% endif %}">ユーザー</a>
     </details>
+
+    <div class="sidebar-label">連携</div>
+    <a href="/ui/integration-status" class="{% if active_nav == 'integration_status' %}active{% endif %}">連携ステータス(ERP/AI_TM)</a>
 
     {% set current_path = request.url.path %}
     {% set next_url = current_path ~ ("?" ~ request.url.query if request.url.query else "") %}
