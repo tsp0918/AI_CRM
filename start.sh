@@ -36,7 +36,8 @@ echo "マイグレーションを適用しています..."
 unset DATABASE_URL  # alembic.ini の既定(所有者ロール)を使う
 alembic upgrade head
 
-PORT="${PORT:-8000}"
+# 8000番台/9000番台はAI_TM/ERP側が使用するため避ける(2026-08-16)。
+PORT="${PORT:-7500}"
 HOST="127.0.0.1"
 DEMO_TENANT="00000000-0000-0000-0000-0000000000aa"
 
