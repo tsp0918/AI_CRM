@@ -113,12 +113,12 @@ class TestSubmitProvisionalReview:
         assert review_case.case_no == f"CRM-{quote.quote_number}"
 
         message = db_session.query(OutboxMessage).filter_by(
-            tenant_id=tenant_id, kind="aitm.review.submit",
+            tenant_id=tenant_id, kind="aitm.review.submit.provisional",
         ).one()
         assert message.target_system == "aitm"
         assert message.status == OutboxStatus.PENDING
-        assert message.payload["case_no"] == review_case.case_no
-        assert message.payload["line_items"] == [{"erp_material_code": "MAT-0001", "quantity": 2.0}]
+        assert message.payload["crm_quote_id"] == str(quote.id)
+        assert message.payload["products"] == [{"product_code": "MAT-0001", "quantity": 2.0}]
 
     def test_unmapped_product_creates_action_item_instead(self, db_session, tenant_id):
         _, engagement = create_account_and_engagement(db_session, tenant_id)

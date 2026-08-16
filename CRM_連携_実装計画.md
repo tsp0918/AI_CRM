@@ -199,6 +199,38 @@ functional smoke testで動作確認済み。
 
 ---
 
+## 4.5 E2E疎通テスト結果(2026-08-16)
+
+同一マシン上で実際に稼働しているAI_TM(`/Users/takehirosato/Desktop/AI_TradeManagement`、
+モジュール型・複数ポート)とERP(`/Users/takehirosato/Desktop/erp-system`、port 8888)に
+対し、CRM側の実コード(`scripts/process_outbox.py`経由)で実際にHTTPリクエストを送信し、
+応答をDBへ反映するところまで確認した。
+
+**実施内容:** テナント・取引先・案件・ERP品目マッピング済み商品・見積を実際に作成し、
+`submit_provisional_review`/`submit_commerce_check`/`submit_quota_check`の3つをOutboxへ
+投入 → `process_outbox.py`が実サービスへ送信 → 応答を`ReviewCase`/`ComplianceStatus`/
+`LicenseAllocation`へ反映、まで一気通貫で成功(`sent=3 retried=0 dlq=0 failed_no_retry=0`)。
+
+**判明した相違点とCRM側の対応(コード修正済み):**
+
+| 項目 | 引き継ぎ書の想定 | 実際のAPI(2026-08-16時点) | 対応 |
+|---|---|---|---|
+| AI_TM審査 case_no採番 | CRM側が採番して送信 | **AI_TM側が採番して応答で返す** | `ReviewCase.case_no`はCRM内部識別子として維持、AI_TM発行のcase_noは`provider_request_id`に保存。`submit_formal_review`の`parent_case_no`もAI_TM発行のcase_noを参照するよう変更 |
+| AI_TM審査 エンドポイント | `/api/reviews`単一 | `/api/crm/provisional-review`と`/api/crm/formal-review`の2本(ai_validationモジュール, 実行時ポートは環境依存) | Outboxの`kind`を`aitm.review.submit.provisional`/`.formal`に分割し、`kind`からパスを解決 |
+| AI_TM審査 ペイロード | `counterparty_ref`/`end_user_ref`(party_ref構造体)、`line_items` | `counterparty_name`(文字列)、`end_user_party_id`、`products: [{product_code, quantity}]`、`title`、`total_value_usd` | `_build_payload()`を実スキーマに合わせて全面差し替え |
+| ERP商流ゲート(IF-32) パス | `/gts/screening/commerce-check` | `/crm/commerce-check` | パス修正 |
+| ERP商流ゲート ペイロード | `crm_quote_id`/`crm_engagement_id`はUUID文字列 | ERP側は`integer\|null`型定義(UUID文字列を送ると422) | これらのフィールドは送らず、突合は`OutboxMessage.ref_type`/`ref_id`で完結させる方式に変更。`counterparty`は`{bp_code, crm_account_id, name, country}`のシンプルな辞書 |
+| AI_TMライセンス(IF-06/07) パス | `/api/licenses/quota-check`(一致)、`/api/licenses/allocate`、`/api/licenses/release` | quota-checkは一致。allocateは`POST /api/licenses/allocations`、releaseは`DELETE /api/licenses/allocations/{allocation_no}` | パス・HTTPメソッド修正。DELETEは`SignedClient`がPOST専用のため署名なしの生リクエストで実装(実エンドポイントも認証必須ではなかった) |
+| ERP側Webhook配信(IF-26/27/29/30/31) | ERPからCRMへPush | **`erp-system`の`.env.example`に`CRM_WEBHOOK_BASE_URL`等が用意されており、パスも本実装(`/webhooks/erp/delivery-posted`等)とほぼ一致** — ただし現在稼働中のERPプロセスでは未設定のため実際のPushは今回未検証 | 変更なし(今回のE2E範囲外。ERP側`.env`設定+再起動が必要なため、他システムへの影響を考慮しユーザー確認の上で別途実施) |
+| 認証 | Bearer + HMAC-SHA256(CRM独自設計) | ERPは`x-signature`/`x-timestamp`ヘッダを受け取る作り(`SignedClient`とヘッダ名レベルで一致)。AI_TM側は現状いずれのモジュールも認証必須ではない | 変更不要。ERP側は`CRM_INBOUND_SIGNING_SECRET`等が空のため現状シグネチャ未検証(値を設定すれば`SignedClient`側は追随不要 — 生成ロジックは既に一致) |
+
+**確認できなかった/未検証の項目:**
+- ERP→CRMのWebhook Push方向(IF-26/27/29/30/31の受信側)。ERPの`.env`設定変更とプロセス再起動を伴うため、他システムへの影響を考慮し今回は見送った
+- AI_TMからの正式な判定結果通知(IF-10相当)。今回の3件はいずれも「起票・応答」の同期部分のみで、非同期の判定確定通知は別経路(未特定)の可能性がある
+- `erp_transcription.py`(IF-25受注転記)・`deemed_export.py`(IF-09)・`rnd_opportunity.py`(IF-14)は実サービス側の対応エンドポイントを未調査(それぞれERP `/sd/sales-orders`、AI_TM `screening`/`rnd_assessment`モジュール配下に候補はあるが未検証)
+
+---
+
 ## 5. 未決事項(着手前に人間の判断が必要)
 
 1. **`ComplianceStatus.gate_kind`は新規カラムか、`check_type`からの導出か。** 既存`ComplianceCheckType`(`ANTI_SOCIAL`/`CREDIT`/`SANCTIONS`/`EXPORT_CONTROL`)は既に「商流系」「輸出系」に自然に二分できる。新規カラムを持たせると二重の真実になりうるが、クエリの単純さでは新規カラムに利点がある。**方針決定が必要。**

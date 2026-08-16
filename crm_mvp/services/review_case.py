@@ -37,7 +37,6 @@ from ..models import (
 from .action_items import create_manual_action_item
 from .integration_client import SignedClient
 from .outbox import classify_http_response, enqueue_outbox, register_dispatcher
-from .party_compliance import build_party_ref
 from .quoting import list_contract_line_items, list_quote_line_items
 
 REVIEW_ACTION_ASSIGNEE = "輸出管理チーム"
@@ -103,30 +102,36 @@ def build_review_key_hash(
 
 
 def _build_payload(
-    *, case_no: str, parent_case_no: str | None, review_type: ReviewType,
+    *, title: str, parent_case_no: str | None,
     line_item_codes: list[tuple[str, float]], destination_country: str | None,
-    end_use: str | None, total_amount: Decimal, currency: str,
-    review_key_hash: str, engagement_id: uuid.UUID,
-    counterparty_ref: dict, end_user_ref: dict | None,
+    end_use: str | None, total_amount: Decimal,
+    engagement_id: uuid.UUID, quote_id: uuid.UUID | None, contract_id: uuid.UUID | None,
+    counterparty: Account | None, end_user: Account | None,
 ) -> dict:
+    """AI_TM `ai_validation`モジュールの実API契約に合わせたペイロード
+    (2026-08-16、実サービスへのE2E疎通確認で判明した実際のスキーマ)。
+
+    引き継ぎ書の設計(`counterparty_ref`構造体・CRM側でのcase_no採番)とは
+    異なり、実際のAI_TMは`counterparty_name`(文字列)のみを求め、
+    **case_noはAI_TM側が採番して返す**(CRM側が送るのではない)。
+    真のFX換算が無いため`total_value_usd`は円建て等でも生の金額をそのまま
+    渡す(既知の簡略化、モジュールdocstring参照)。
+    """
     return {
-        "case_no": case_no,
-        "parent_case_no": parent_case_no,
-        "review_type": review_type.value,
-        "source_module": "crm",
-        "review_key_hash": review_key_hash,
-        "line_items": [
-            {"erp_material_code": code, "quantity": qty}
-            for code, qty in line_item_codes
+        "title": title,
+        "counterparty_name": counterparty.name if counterparty else None,
+        "destination_country": destination_country or "",
+        "end_user_party_id": end_user.aitm_party_id if end_user else None,
+        "end_use": end_use or "",
+        "total_value_usd": float(total_amount),
+        "products": [
+            {"product_code": code, "quantity": qty} for code, qty in line_item_codes
         ],
-        "destination_country": destination_country,
-        # §5.2: エンドユーザーが取引先と同一の場合も明示的に送る。
-        "counterparty_ref": counterparty_ref,
-        "end_user_ref": end_user_ref or counterparty_ref,
-        "end_use": end_use,
-        "currency": currency,
-        "total_value_original": str(total_amount),
-        "engagement_id": str(engagement_id),
+        "revision": 1,
+        "crm_quote_id": str(quote_id) if quote_id else None,
+        "crm_engagement_id": str(engagement_id),
+        **({"parent_case_no": parent_case_no} if parent_case_no else {}),
+        **({"crm_contract_id": str(contract_id)} if contract_id else {}),
     }
 
 
@@ -173,15 +178,14 @@ def submit_provisional_review(
         if quote.end_user_account_id else None
     )
     payload = _build_payload(
-        case_no=case_no, parent_case_no=None, review_type=ReviewType.PROVISIONAL,
+        title=f"{engagement.name} - {quote.quote_number}", parent_case_no=None,
         line_item_codes=codes, destination_country=quote.destination_country,
-        end_use=quote.end_use, total_amount=quote.total_amount, currency=quote.currency,
-        review_key_hash=review_key_hash, engagement_id=engagement.id,
-        counterparty_ref=build_party_ref(counterparty) if counterparty else {},
-        end_user_ref=build_party_ref(end_user) if end_user else None,
+        end_use=quote.end_use, total_amount=quote.total_amount,
+        engagement_id=engagement.id, quote_id=quote.id, contract_id=None,
+        counterparty=counterparty, end_user=end_user,
     )
     enqueue_outbox(
-        session, tenant_id, target_system="aitm", kind="aitm.review.submit",
+        session, tenant_id, target_system="aitm", kind="aitm.review.submit.provisional",
         payload=payload, ref_type="review_case", ref_id=str(review_case.id), actor=actor,
     )
     return review_case
@@ -214,7 +218,8 @@ def submit_formal_review(
         total_amount=contract.total_amount, currency=contract.currency,
     )
 
-    parent_case_no: str | None = None
+    parent_case_no: str | None = None       # 自社(CRM)内部の記録用
+    aitm_parent_case_no: str | None = None  # AI_TM側へ送るのはこちら(AI_TM採番のcase_no)
     if contract.quote_id is not None:
         candidate = session.execute(
             select(ReviewCase).where(
@@ -231,6 +236,7 @@ def submit_formal_review(
             and candidate.valid_until > now
         ):
             parent_case_no = candidate.case_no
+            aitm_parent_case_no = candidate.provider_request_id
 
     case_no = f"CRM-{contract.contract_number}"
     review_case = ReviewCase(
@@ -248,23 +254,36 @@ def submit_formal_review(
         if contract.end_user_account_id else None
     )
     payload = _build_payload(
-        case_no=case_no, parent_case_no=parent_case_no, review_type=ReviewType.FORMAL,
+        title=f"{engagement.name} - {contract.contract_number}",
+        parent_case_no=aitm_parent_case_no,
         line_item_codes=codes, destination_country=contract.destination_country,
         end_use=contract.end_use, total_amount=contract.total_amount,
-        currency=contract.currency, review_key_hash=review_key_hash,
-        engagement_id=engagement.id,
-        counterparty_ref=build_party_ref(counterparty) if counterparty else {},
-        end_user_ref=build_party_ref(end_user) if end_user else None,
+        engagement_id=engagement.id, quote_id=contract.quote_id, contract_id=contract.id,
+        counterparty=counterparty, end_user=end_user,
     )
     enqueue_outbox(
-        session, tenant_id, target_system="aitm", kind="aitm.review.submit",
+        session, tenant_id, target_system="aitm", kind="aitm.review.submit.formal",
         payload=payload, ref_type="review_case", ref_id=str(review_case.id), actor=actor,
     )
     return review_case
 
 
-def dispatch_aitm_review_submit(session: Session, message: OutboxMessage) -> OutboxResult:
-    """`register_aitm_dispatchers()`経由でOutbox処理から呼ばれる送信関数。"""
+# 2026-08-16 E2E疎通確認で判明した実際のパス(ai_validationモジュール、
+# CRM_連携_実装計画.md参照)。仮審査/正式審査でエンドポイントが分かれている。
+_REVIEW_ENDPOINTS = {
+    "aitm.review.submit.provisional": "/api/crm/provisional-review",
+    "aitm.review.submit.formal": "/api/crm/formal-review",
+}
+
+
+def _dispatch_aitm_review_submit(session: Session, message: OutboxMessage) -> OutboxResult:
+    """`register_aitm_dispatchers()`経由でOutbox処理から呼ばれる送信関数。
+
+    実際のAI_TM(`ai_validation`モジュール)はcase_noを自ら採番して返す
+    (CRM側が送るのではない) — レスポンスの`case_no`を`provider_request_id`
+    に保存する。`ReviewCase.case_no`(CRM内部の識別子)はそのまま維持し、
+    `parent_case_no`引き継ぎ等の内部ロジックはそちらを使い続ける。
+    """
     review_case = session.execute(
         select(ReviewCase).where(
             ReviewCase.tenant_id == message.tenant_id,
@@ -274,12 +293,16 @@ def dispatch_aitm_review_submit(session: Session, message: OutboxMessage) -> Out
     if review_case is None:
         return OutboxResult.FAILED_NO_RETRY
 
+    path = _REVIEW_ENDPOINTS.get(message.kind)
+    if path is None:
+        return OutboxResult.FAILED_NO_RETRY
+
     client = SignedClient(
         os.environ.get("AITM_REVIEW_URL"), message.tenant_id,
         bearer_env="AITM_REVIEW_BEARER", secret_env="AITM_REVIEW_SECRET",
     )
     try:
-        response = client.post("/api/reviews", message.payload, request_id=str(message.id))
+        response = client.post(path, message.payload, request_id=str(message.id))
     except httpx.HTTPError as exc:
         return classify_http_response(None, exc=exc)
     finally:
@@ -288,7 +311,7 @@ def dispatch_aitm_review_submit(session: Session, message: OutboxMessage) -> Out
     result = classify_http_response(response)
     if result == OutboxResult.SENT and response.content:
         data = response.json()
-        review_case.provider_request_id = data.get("request_id")
+        review_case.provider_request_id = data.get("case_no")
         valid_until_raw = data.get("valid_until")
         if valid_until_raw:
             review_case.valid_until = datetime.fromisoformat(valid_until_raw)
@@ -303,7 +326,8 @@ def register_aitm_dispatchers() -> None:
     目視できる(コンプライアンスゲートを黙って偽クリアにしないため)。
     """
     if os.environ.get("AITM_REVIEW_URL"):
-        register_dispatcher("aitm.review.submit", dispatch_aitm_review_submit)
+        for kind in _REVIEW_ENDPOINTS:
+            register_dispatcher(kind, _dispatch_aitm_review_submit)
 
 
 def check_review_clearance(

@@ -26,7 +26,6 @@ from ..models import Account, ComplianceStatus, Engagement, OutboxMessage, Quote
 from .action_items import create_manual_action_item
 from .integration_client import SignedClient
 from .outbox import classify_http_response, enqueue_outbox, register_dispatcher
-from .party_compliance import build_party_ref
 
 COMMERCE_FRESHNESS_WINDOW_DAYS = 180
 COMMERCE_ACTION_ASSIGNEE = "与信管理チーム"
@@ -47,19 +46,20 @@ def submit_commerce_check(
     session: Session, tenant_id: uuid.UUID, quote: Quote, engagement: Engagement, *,
     actor: str,
 ) -> None:
+    """ERP `CommerceCheckRequest`の実スキーマに合わせたペイロード(2026-08-16
+    E2E疎通確認で判明)。`crm_quote_id`/`crm_engagement_id`はERP側で`int|None`
+    として定義されておりUUID文字列は422になるため送らない — 突合はCRM側の
+    `ref_type`/`ref_id`(OutboxMessage)で完結させる。"""
     counterparty = session.get(Account, engagement.account_id)
-    end_user = (
-        session.get(Account, quote.end_user_account_id)
-        if quote.end_user_account_id else None
-    )
     payload = {
-        "request_type": "quote_draft",
-        "crm_quote_id": str(quote.id),
-        "crm_engagement_id": str(engagement.id),
-        "counterparty": build_party_ref(counterparty) if counterparty else {},
-        "end_user": build_party_ref(end_user) if end_user else None,
-        "check_types": ["credit", "antisocial"],
-        "amount": {"currency": quote.currency, "total_amount": str(quote.total_amount)},
+        "request_type": "quote",
+        "counterparty": {
+            "bp_code": counterparty.external_id if counterparty and counterparty.external_system == "erp" else None,
+            "crm_account_id": str(counterparty.id) if counterparty else None,
+            "name": counterparty.name if counterparty else None,
+            "country": counterparty.country if counterparty else None,
+        },
+        "client_id": "AI_CRM",
     }
     enqueue_outbox(
         session, tenant_id, target_system="erp", kind="erp.commerce_check.submit",
@@ -67,9 +67,12 @@ def submit_commerce_check(
     )
 
 
-def _apply_commerce_result(session: Session, tenant_id: uuid.UUID, payload: dict, data: dict) -> None:
-    engagement_id = payload.get("crm_engagement_id")
-    engagement = session.get(Engagement, uuid.UUID(engagement_id)) if engagement_id else None
+def _apply_commerce_result(session: Session, tenant_id: uuid.UUID, message: OutboxMessage, data: dict) -> None:
+    engagement = None
+    if message.ref_type == "quote" and message.ref_id:
+        quote = session.get(Quote, uuid.UUID(message.ref_id))
+        if quote is not None:
+            engagement = session.get(Engagement, quote.engagement_id)
     account = session.get(Account, engagement.account_id) if engagement else None
     if account is None:
         return
@@ -140,8 +143,9 @@ def dispatch_erp_commerce_check(session: Session, message: OutboxMessage) -> Out
         bearer_env="ERP_COMMERCE_BEARER", secret_env="ERP_COMMERCE_SECRET",
     )
     try:
+        # 2026-08-16 E2E疎通確認で判明した実パス(`/gts/screening/...`ではない)。
         response = client.post(
-            "/gts/screening/commerce-check", message.payload, request_id=str(message.id),
+            "/crm/commerce-check", message.payload, request_id=str(message.id),
         )
     except httpx.HTTPError as exc:
         return classify_http_response(None, exc=exc)
@@ -150,7 +154,7 @@ def dispatch_erp_commerce_check(session: Session, message: OutboxMessage) -> Out
 
     result = classify_http_response(response)
     if result == OutboxResult.SENT and response.content:
-        _apply_commerce_result(session, message.tenant_id, message.payload, response.json())
+        _apply_commerce_result(session, message.tenant_id, message, response.json())
     return result
 
 
