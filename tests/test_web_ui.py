@@ -1063,13 +1063,13 @@ class TestSidebarNav:
     def test_master_data_section_auto_expands_when_active(self, ui_client):
         resp = ui_client.get("/ui/products")
         assert resp.status_code == 200
-        assert "<details open>" in resp.text
+        assert '<details class="nav-group" name="nav-group" open>' in resp.text
         assert 'href="/ui/products" class="active"' in resp.text
 
     def test_master_data_section_collapsed_elsewhere(self, ui_client):
         resp = ui_client.get("/ui/")
         assert resp.status_code == 200
-        assert "<details open>" not in resp.text
+        assert " open>" not in resp.text
 
     def test_quick_note_link_has_no_query_params(self, ui_client):
         # 担当者の選択はもう常設サイドバーウィジェット側のCookieで管理する
