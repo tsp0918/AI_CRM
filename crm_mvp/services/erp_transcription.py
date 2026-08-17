@@ -13,6 +13,21 @@ IF-29/30/31が契約を逆引きする際のキーになる。
 新設されたことを確認し、こちらへ切り替えた(旧`/sd/sales-orders`は通常
 業務API向けでOAuth2認証が必要だったが、新エンドポイントは`/crm/
 commerce-check`と同じHMAC署名スキームで、`document_date`も不要になった)。
+
+同日、ERP発案・実装済みの`customer`インライン登録フィールド
+(`CrmCustomerPayload`)に対応した。取引先がERP未登録
+(`external_system != "erp"`)の場合、`customer_code`の代わりに
+`name`/`country`等を直接送ることで、ERP側がその場でBPを新規登録して
+くれる — これによりCRM発生(ERP未登録)の新規顧客契約でも受注転記が
+成立するようになった(従来のA-03: 契約close済みだがERPに受注が存在
+しない、という異常検出の主要因を解消)。
+
+**既知の制約**: レスポンス`CrmContractResponse`には`end_user_bp_code`は
+あるが、主要取引先側に新規採番されたBPコードを返すフィールドが無いため、
+CRM側は登録後もAccountの`external_id`を更新できない。そのため同一
+Accountで次の契約を結ぶ際も再度インライン登録扱いになり、ERP側に重複
+BPが作られうる(ERPへフィードバック予定、対称性のため`customer_bp_code`
+のようなフィールドの追加を依頼する)。
 """
 
 from __future__ import annotations
@@ -52,6 +67,30 @@ def _end_user_payload(end_user: Account | None) -> dict | None:
     }
 
 
+def _customer_fields(counterparty: Account | None) -> dict:
+    """ERP登録済み(`external_system=="erp"`)なら`customer_code`、
+    未登録なら`customer`インライン登録(`CrmCustomerPayload`)を使う。
+    どちらもcountry必須のため、country未設定のAccountは`customer_code`/
+    `customer`のどちらも送らず、ERP側のバリデーションエラーで
+    フェイルクローズさせる(無理に何かを送って誤登録しない)。"""
+    if counterparty is None:
+        return {"customer_code": None, "customer": None}
+    if counterparty.external_system == "erp" and counterparty.external_id:
+        return {"customer_code": counterparty.external_id, "customer": None}
+    if not counterparty.country:
+        return {"customer_code": None, "customer": None}
+    return {
+        "customer_code": None,
+        "customer": {
+            "name": counterparty.name, "country": counterparty.country,
+            "address": None, "crm_account_id": str(counterparty.id),
+            "email": None,
+            "payment_terms": counterparty.payment_terms_master,
+            "credit_limit": str(counterparty.credit_limit) if counterparty.credit_limit is not None else None,
+        },
+    }
+
+
 def submit_contract_transcription(
     session: Session, tenant_id: uuid.UUID, contract: Contract, engagement: Engagement, *,
     actor: str,
@@ -74,10 +113,7 @@ def submit_contract_transcription(
         "crm_contract_id": str(contract.id),
         "crm_engagement_id": str(engagement.id),
         "aitm_transaction_id": review_case.provider_request_id if review_case else None,
-        "customer_code": (
-            counterparty.external_id
-            if counterparty and counterparty.external_system == "erp" else None
-        ),
+        **_customer_fields(counterparty),
         "end_user": _end_user_payload(end_user),
         "customer_po_number": contract.contract_number,
         "contract_start_date": contract.start_date.isoformat() if contract.start_date else None,
@@ -121,6 +157,17 @@ def dispatch_erp_sales_order_submit(session: Session, message: OutboxMessage) ->
         if contract is not None and data.get("erp_document_number"):
             contract.external_system = "erp"
             contract.external_id = data["erp_document_number"]
+            # `customer`インライン登録(ERP未登録取引先)でBPが新規採番された
+            # 場合、`customer_bp_code`をAccountへ反映する。次回以降の契約は
+            # これで`customer_code`経路になり、ERP側に重複BPが作られるのを防ぐ
+            # (2026-08-17、ERPからのフィードバックを受けて追加された対称
+            # フィールド)。
+            if data.get("customer_bp_code"):
+                engagement = session.get(Engagement, contract.engagement_id)
+                counterparty = session.get(Account, engagement.account_id) if engagement else None
+                if counterparty is not None and not counterparty.external_id:
+                    counterparty.external_system = "erp"
+                    counterparty.external_id = data["customer_bp_code"]
             session.flush()
     return result
 
