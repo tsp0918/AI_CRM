@@ -49,21 +49,55 @@
     }
     .sidebar a:hover, .sidebar summary:hover { text-decoration: none; background: #1f2937; color: white; }
     .sidebar a.active { background: #2563eb; color: white; }
-    .sidebar details > a { padding-left: 22px; }
+    .sidebar .group-links > a { padding-left: 22px; }
     .sidebar-spacer { flex: 1; }
+
+    /* 機能メニューのアコーディオン(2026-08-17)。同一name属性の<details>は
+       ブラウザ標準で排他開閉になる(1つ開くと他が閉じる、JS不要)。 */
+    .sidebar .nav-group { margin: 0; }
+    .sidebar .nav-group summary {
+      list-style: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      color: #9ca3af;
+      font-weight: 600;
+      margin-top: 4px;
+    }
+    .sidebar .nav-group summary::-webkit-details-marker { display: none; }
+    .sidebar .nav-group summary .chevron {
+      display: inline-block;
+      transition: transform .15s ease;
+      color: #6b7280;
+      font-size: 10px;
+    }
+    .sidebar .nav-group[open] summary .chevron { transform: rotate(90deg); }
+    .sidebar .nav-group[open] summary { color: #e5e7eb; }
+    .sidebar .nav-group .group-links { padding-top: 2px; padding-bottom: 4px; }
     .sidebar-actor {
       font-size: 11px; color: #9ca3af; padding: 10px;
       border-top: 1px solid #1f2937; margin-top: 8px;
       display: flex; flex-direction: column; gap: 6px;
     }
 
-    /* サイドバー常設のクイック入力ウィジェット(2026-08-14)。
-       どのページからでも、その場を離れずにログを残せるようにする。 */
+    /* サイドバー常設のクイック入力ウィジェット(2026-08-14、2026-08-17に
+       グロナビ上部固定へ変更)。どのページからでも、その場を離れずに
+       ログを残せるようにする。 */
     .sidebar-quicknote {
-      border-top: 1px solid #1f2937;
-      margin-top: 10px;
-      padding: 10px 10px 4px;
+      border-bottom: 1px solid #1f2937;
+      margin-bottom: 8px;
+      padding: 4px 10px 14px;
     }
+    .sidebar-quicknote .quicknote-focus-link {
+      display: block;
+      font-size: 11px;
+      color: #9ca3af;
+      margin-top: 2px;
+    }
+    .sidebar-quicknote .quicknote-focus-link:hover { color: white; }
     .sidebar-quicknote select,
     .sidebar-quicknote textarea {
       font-size: 12px;
@@ -364,42 +398,6 @@
   <nav class="sidebar">
     <span class="sidebar-brand">Agentic CRM</span>
 
-    <a href="/ui/" class="{% if active_nav == 'dashboard' %}active{% endif %}">ダッシュボード</a>
-    <a href="/ui/quick-note" class="{% if active_nav == 'quick_note' %}active{% endif %}">⚡ クイック入力(フォーカス版)</a>
-    <a href="/ui/engagements/new" class="{% if active_nav == 'new' %}active{% endif %}">+ 新規案件</a>
-    <a href="/ui/proposals" class="{% if active_nav == 'proposals' %}active{% endif %}">
-      提案承認{% if pending_count %}<span class="badge-count">{{ pending_count }}</span>{% endif %}
-    </a>
-
-    <div class="sidebar-label">案件・取引先</div>
-    <a href="/ui/leads" class="{% if active_nav == 'leads' %}active{% endif %}">リード</a>
-    <a href="/ui/accounts" class="{% if active_nav == 'accounts' %}active{% endif %}">取引先</a>
-    <a href="/ui/quotes" class="{% if active_nav == 'quotes' %}active{% endif %}">見積・契約</a>
-    <a href="/ui/renewals" class="{% if active_nav == 'renewals' %}active{% endif %}">契約更新</a>
-
-    <div class="sidebar-label">マーケティング</div>
-    <a href="/ui/campaigns" class="{% if active_nav == 'campaigns' %}active{% endif %}">キャンペーン</a>
-    <a href="/ui/sequences" class="{% if active_nav == 'sequences' %}active{% endif %}">シーケンス</a>
-
-    <div class="sidebar-label">レポート</div>
-    <a href="/ui/reports/revenue" class="{% if active_nav == 'revenue_report' %}active{% endif %}">売上レポート</a>
-    <a href="/ui/reports/builder" class="{% if active_nav == 'report_builder' %}active{% endif %}">レポートビルダー</a>
-    <a href="/ui/forecast-risk" class="{% if active_nav == 'forecast_risk' %}active{% endif %}">リスクレーダー</a>
-    <a href="/ui/reports/history" class="{% if active_nav == 'report_history' %}active{% endif %}">スナップショット履歴</a>
-
-    <details {% if active_nav in ['erp_business_partners', 'erp_materials', 'products', 'sales_groups', 'users'] %}open{% endif %}>
-      <summary class="sidebar-label" style="padding-left:10px; margin-top:6px;">マスタ管理</summary>
-      <a href="/ui/erp-business-partners" class="{% if active_nav == 'erp_business_partners' %}active{% endif %}">ERP取引先</a>
-      <a href="/ui/erp-materials" class="{% if active_nav == 'erp_materials' %}active{% endif %}">ERP品目</a>
-      <a href="/ui/products" class="{% if active_nav == 'products' %}active{% endif %}">商品</a>
-      <a href="/ui/sales-groups" class="{% if active_nav == 'sales_groups' %}active{% endif %}">セールスグループ</a>
-      <a href="/ui/users" class="{% if active_nav == 'users' %}active{% endif %}">ユーザー</a>
-    </details>
-
-    <div class="sidebar-label">連携</div>
-    <a href="/ui/integration-status" class="{% if active_nav == 'integration_status' %}active{% endif %}">連携ステータス(ERP/AI_TM)</a>
-    <a href="/ui/rnd-opportunities" class="{% if active_nav == 'rnd_opportunities' %}active{% endif %}">R&D起点商談</a>
-
     {% set current_path = request.url.path %}
     {% set next_url = current_path ~ ("?" ~ request.url.query if request.url.query else "") %}
     <div class="sidebar-quicknote">
@@ -428,7 +426,61 @@
       {% else %}
       <p class="empty-state">対象の案件がありません</p>
       {% endif %}
+      <a href="/ui/quick-note" class="quicknote-focus-link {% if active_nav == 'quick_note' %}active{% endif %}">フォーカス入力で開く →</a>
     </div>
+
+    <a href="/ui/" class="{% if active_nav == 'dashboard' %}active{% endif %}">ダッシュボード</a>
+    <a href="/ui/engagements/new" class="{% if active_nav == 'new' %}active{% endif %}">+ 新規案件</a>
+    <a href="/ui/proposals" class="{% if active_nav == 'proposals' %}active{% endif %}">
+      提案承認{% if pending_count %}<span class="badge-count">{{ pending_count }}</span>{% endif %}
+    </a>
+
+    <details class="nav-group" name="nav-group" {% if active_nav in ['leads', 'accounts', 'quotes', 'renewals'] %}open{% endif %}>
+      <summary><span>案件・取引先</span><span class="chevron">▶</span></summary>
+      <div class="group-links">
+        <a href="/ui/leads" class="{% if active_nav == 'leads' %}active{% endif %}">リード</a>
+        <a href="/ui/accounts" class="{% if active_nav == 'accounts' %}active{% endif %}">取引先</a>
+        <a href="/ui/quotes" class="{% if active_nav == 'quotes' %}active{% endif %}">見積・契約</a>
+        <a href="/ui/renewals" class="{% if active_nav == 'renewals' %}active{% endif %}">契約更新</a>
+      </div>
+    </details>
+
+    <details class="nav-group" name="nav-group" {% if active_nav in ['campaigns', 'sequences'] %}open{% endif %}>
+      <summary><span>マーケティング</span><span class="chevron">▶</span></summary>
+      <div class="group-links">
+        <a href="/ui/campaigns" class="{% if active_nav == 'campaigns' %}active{% endif %}">キャンペーン</a>
+        <a href="/ui/sequences" class="{% if active_nav == 'sequences' %}active{% endif %}">シーケンス</a>
+      </div>
+    </details>
+
+    <details class="nav-group" name="nav-group" {% if active_nav in ['revenue_report', 'report_builder', 'forecast_risk', 'report_history'] %}open{% endif %}>
+      <summary><span>レポート</span><span class="chevron">▶</span></summary>
+      <div class="group-links">
+        <a href="/ui/reports/revenue" class="{% if active_nav == 'revenue_report' %}active{% endif %}">売上レポート</a>
+        <a href="/ui/reports/builder" class="{% if active_nav == 'report_builder' %}active{% endif %}">レポートビルダー</a>
+        <a href="/ui/forecast-risk" class="{% if active_nav == 'forecast_risk' %}active{% endif %}">リスクレーダー</a>
+        <a href="/ui/reports/history" class="{% if active_nav == 'report_history' %}active{% endif %}">スナップショット履歴</a>
+      </div>
+    </details>
+
+    <details class="nav-group" name="nav-group" {% if active_nav in ['erp_business_partners', 'erp_materials', 'products', 'sales_groups', 'users'] %}open{% endif %}>
+      <summary><span>マスタ管理</span><span class="chevron">▶</span></summary>
+      <div class="group-links">
+        <a href="/ui/erp-business-partners" class="{% if active_nav == 'erp_business_partners' %}active{% endif %}">ERP取引先</a>
+        <a href="/ui/erp-materials" class="{% if active_nav == 'erp_materials' %}active{% endif %}">ERP品目</a>
+        <a href="/ui/products" class="{% if active_nav == 'products' %}active{% endif %}">商品</a>
+        <a href="/ui/sales-groups" class="{% if active_nav == 'sales_groups' %}active{% endif %}">セールスグループ</a>
+        <a href="/ui/users" class="{% if active_nav == 'users' %}active{% endif %}">ユーザー</a>
+      </div>
+    </details>
+
+    <details class="nav-group" name="nav-group" {% if active_nav in ['integration_status', 'rnd_opportunities'] %}open{% endif %}>
+      <summary><span>連携</span><span class="chevron">▶</span></summary>
+      <div class="group-links">
+        <a href="/ui/integration-status" class="{% if active_nav == 'integration_status' %}active{% endif %}">連携ステータス(ERP/AI_TM)</a>
+        <a href="/ui/rnd-opportunities" class="{% if active_nav == 'rnd_opportunities' %}active{% endif %}">R&D起点商談</a>
+      </div>
+    </details>
 
     <div class="sidebar-spacer"></div>
     <div class="sidebar-actor">

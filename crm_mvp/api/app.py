@@ -36,6 +36,10 @@ def create_app() -> FastAPI:
             status_code=303,
         )
 
+    @app.get("/health")
+    async def health() -> dict:
+        return {"status": "ok"}
+
     return app
 
 

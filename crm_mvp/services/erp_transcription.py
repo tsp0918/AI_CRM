@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import datetime, timezone
 
 import httpx
 from sqlalchemy import select
@@ -19,7 +20,6 @@ from sqlalchemy.orm import Session
 
 from ..enums import OutboxResult, ReviewType
 from ..models import Account, Contract, Engagement, OutboxMessage, Product, ReviewCase
-from .integration_client import SignedClient
 from .outbox import classify_http_response, enqueue_outbox, register_dispatcher
 from .party_compliance import build_party_ref
 from .quoting import list_contract_line_items
@@ -57,6 +57,10 @@ def submit_contract_transcription(
         "crm_engagement_id": str(engagement.id),
         "aitm_transaction_id": review_case.provider_request_id if review_case else None,
         "skip_export_check": True,
+        # ERPの`SalesOrderCreate.document_date`は必須(2026-08-16 P3疎通確認で
+        # 判明 — 未設定だと422)。「受注をERPへ起票した日」を表すため実時刻を使う
+        # (contract.start_dateは契約期間の開始日であって転記日ではない)。
+        "document_date": datetime.now(timezone.utc).date().isoformat(),
         "customer_code": (
             counterparty.external_id
             if counterparty and counterparty.external_system == "erp" else None
@@ -81,17 +85,39 @@ def submit_contract_transcription(
     )
 
 
-def dispatch_erp_sales_order_submit(session: Session, message: OutboxMessage) -> OutboxResult:
-    client = SignedClient(
-        os.environ.get("ERP_BASE_URL"), message.tenant_id,
-        bearer_env="ERP_SALES_ORDER_BEARER", secret_env="ERP_SALES_ORDER_SECRET",
-    )
+def _fetch_erp_oauth_token(base_url: str) -> str | None:
+    """`/sd/sales-orders`はB2B用のHMAC署名(`SignedClient`が使う方式)ではなく、
+    通常業務APIと同じOAuth2パスワードフロー認証を要求する(2026-08-16 P3疎通
+    確認で判明 — `/crm/commerce-check`等の署名スキームとは別物)。"""
+    username = os.environ.get("ERP_OAUTH_USERNAME")
+    password = os.environ.get("ERP_OAUTH_PASSWORD")
+    if not username or not password:
+        return None
     try:
-        response = client.post("/sd/sales-orders", message.payload, request_id=str(message.id))
+        response = httpx.post(
+            f"{base_url.rstrip('/')}/auth/token", data={"username": username, "password": password},
+            timeout=httpx.Timeout(30.0, connect=5.0),
+        )
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return None
+    return response.json().get("access_token")
+
+
+def dispatch_erp_sales_order_submit(session: Session, message: OutboxMessage) -> OutboxResult:
+    base_url = os.environ.get("ERP_BASE_URL")
+    oauth_token = _fetch_erp_oauth_token(base_url)
+    if not oauth_token:
+        return OutboxResult.FAILED_NO_RETRY
+
+    try:
+        response = httpx.post(
+            f"{base_url.rstrip('/')}/sd/sales-orders", json=message.payload,
+            headers={"Authorization": f"Bearer {oauth_token}", "X-Request-Id": str(message.id)},
+            timeout=httpx.Timeout(30.0, connect=5.0),
+        )
     except httpx.HTTPError as exc:
         return classify_http_response(None, exc=exc)
-    finally:
-        client.close()
 
     result = classify_http_response(response)
     if result == OutboxResult.SENT and response.content:
@@ -105,5 +131,5 @@ def dispatch_erp_sales_order_submit(session: Session, message: OutboxMessage) ->
 
 
 def register_erp_transcription_dispatchers() -> None:
-    if os.environ.get("ERP_BASE_URL"):
+    if os.environ.get("ERP_BASE_URL") and os.environ.get("ERP_OAUTH_USERNAME"):
         register_dispatcher("erp.sales_order.submit", dispatch_erp_sales_order_submit)

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select, text
@@ -151,7 +152,12 @@ async def _receive_fulfillment_event(request: Request, session: Session, *, kind
             session, ctx.tenant_id, contract, kind=kind,
             erp_document_number=f"{doc_number}:{item.get('material_code', '')}",
             product_code=item.get("material_code"),
-            quantity=item.get("quantity"), amount=item.get("amount", 0),
+            # JSONペイロードはfloat/intで届く。ORM属性にDecimal型以外の
+            # 数値が混ざると、後続のsum(..., Decimal("0"))がflush直後
+            # (未refresh)のオブジェクトを拾ってTypeErrorになる
+            # (2026-08-16 P3疎通確認で判明、billing 2件目以降で発現)。
+            quantity=Decimal(str(item["quantity"])) if item.get("quantity") is not None else None,
+            amount=Decimal(str(item.get("amount", 0))),
             currency=ctx.payload.get("currency", contract.currency),
             posted_at=datetime.fromisoformat(ctx.payload["posted_at"]),
         )
