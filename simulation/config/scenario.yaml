@@ -1,0 +1,77 @@
+# シミュレーション規模・分布パラメータ(docs/BULK_SIMULATION_SPEC.md §3.3)。
+# 数値をコードに直書きしないため、チューニング対象の値はすべてここに置く。
+
+scale:
+  medium:
+    accounts: 25
+    engagements: 60
+    period: {start: "2026-01-01", end: "2026-12-31"}
+  smoke:
+    accounts: 3
+    engagements: 3
+    period: {start: "2026-01-01", end: "2026-03-31"}
+
+seed: 20260814
+
+# §10.1 P1完了条件で明示された「§5・§6の設計値」。ここに固定値として持ち、
+# generators/events.py はこの値に厳密に一致するようイベント数を組み立てる
+# (quote_reach_rate/quote_revisions等の分布は「形」を決めるために使うが、
+# 端数調整は最終的にこのexpected_totalsに合わせる — 詳細は
+# src/apportion.py のコメント参照)。
+expected_totals:
+  medium: {engagements: 60, quotes: 90, contracts: 35, shipments: 69}
+
+# 商談の月次配分(§5.1)。合計60。3月・9月・12月は四半期末/年度末で増加。
+engagement_monthly_distribution: [4, 4, 7, 4, 4, 6, 4, 3, 7, 4, 5, 8]
+
+quadrant_mix:           # §6.1(商談60件に対する厳密な件数: 36/15/6/3)
+  existing_product_existing_customer: 0.60
+  existing_product_new_customer:      0.25
+  new_product_existing_customer:      0.10
+  new_product_new_customer:           0.05
+
+line_items_per_engagement: {1: 0.50, 2: 0.30, 3: 0.20}
+amount_jpy: {median: 5000000, min: 500000, max: 100000000}   # 対数正規分布
+currency_mix: {JPY: 0.60, USD: 0.35, EUR: 0.05}
+destination_mix: {JP: 0.30, KR: 0.20, TW: 0.15, CN: 0.15, US: 0.10, OTHER: 0.10}
+sales_reps: ["SIM営業-1", "SIM営業-2", "SIM営業-3", "SIM営業-4", "SIM営業-5"]
+
+funnel:
+  quote_reach_rate: 0.75        # 商談 → 見積作成に到達する率(45/60)
+  quote_revisions: {1: 0.40, 2: 0.35, 3: 0.17, 4: 0.08}
+  win_rate: 0.58                # 商談 → 契約(60件基準で丸め: 35件)
+  split_shipments: {1: 0.31, 2: 0.40, 3: 0.29}
+
+quote_revision_kinds:    # §5.2改訂内容(review_key_hash不変/変化)
+  note_only:          {rate: 0.30, hash_changes: false}
+  discount:            {rate: 0.25, hash_changes: false}
+  quantity_change:     {rate: 0.25, hash_changes: true}
+  line_item_change:    {rate: 0.15, hash_changes: true}
+  destination_change:  {rate: 0.05, hash_changes: true}
+
+lead_times_days:        # 平均値。正規分布(σ=平均の30%、最小1日)
+  engagement_to_quote: 20
+  quote_revision_interval: 12
+  quote_to_contract: 45
+  contract_to_first_shipment: 30
+  shipment_interval: 60
+  shipment_to_invoice: 5
+
+exception_rates:        # §6.2
+  party_match: 0.08             # 取引先25社に対する割合 → 2社
+  party_possible_match: 0.12    # → 3社
+  provisional_needs_review: 0.20  # 見積90件に対する割合 → 18件
+  override_success: 0.67        # needs_reviewのうちoverrideで通過する割合 → 12件
+  formal_rejected_count: 1
+  license_shortage_count: 3
+  monitoring_hit_count: 2
+  return_count: 3
+  deemed_export_count: 5
+  unmapped_product_count: 2
+  erp_standalone_order_count: 4  # 各四半期1件
+
+execution:
+  parallelism: 5
+  judgment_poll_interval_sec: 5
+  judgment_timeout_sec: 600
+  api_retry: {max: 3, backoff_sec: [2, 8, 30]}

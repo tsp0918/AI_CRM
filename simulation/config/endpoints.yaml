@@ -1,0 +1,42 @@
+# 3システム横断シミュレーション 接続設定(docs/BULK_SIMULATION_SPEC.md §2.2)
+#
+# 2026-08-16 時点でこのマシン上に実際に起動しているポートに合わせている。
+# 仕様書のテンプレート値(CRM:8000, AI_TM validation:8011 [README既定は8001],
+# aitm.portal:8000)とは異なる — 詳細は本ファイル末尾のコメント参照。
+#
+# 認証: 3システムとも現状は署名/Bearer検証を強制していない(2026-08-16の
+# E2E疎通確認で確認済み。ERPのみ X-Timestamp の存在チェックはする)。
+# そのため bearer/signing_secret は未設定(空文字列)でも往復できるが、
+# §2.2 の署名スキームは simulation/src/clients/base.py で常に付与する
+# (相手側が将来検証を有効化しても壊れないようにするため)。
+
+crm:
+  base_url: http://localhost:7500
+  tenant_id: "d9a80db0-aec2-498b-bdc3-efbe93cd8e23"  # シミュレーション専用テナント(新規, デモテナントとは別)
+  bearer: ${CRM_BEARER:-}
+  signing_secret: ${CRM_SIGNING_SECRET:-}
+
+erp:
+  # 2026-08-17: port 8888は修正コミット(b0ab27c等)を反映していない古い
+  # プロセスと判明(--reloadなしで起動されたまま)。9000が現行の稼働先。
+  base_url: http://localhost:9000
+  client_id: "SIM"
+  bearer: ${ERP_BEARER:-}
+  signing_secret: ${ERP_SIGNING_SECRET:-}
+
+aitm:
+  # portal (platform-core, README既定 http://localhost:8000) は本セッションでは
+  # 起動していないプロセスであることを確認済み。付録Aのどの IF もportal宛の
+  # 直接呼び出しを要求していないため、simulationコードはportalを呼ばない。
+  # 設定項目として残すが値は null とし、endpoints.all_base_urls() の
+  # ヘルスチェック/安全ガード対象からは除外する。
+  portal: null
+  validation:     http://localhost:8011  # README既定8001だが実際は8011で起動
+  classification: http://localhost:8002
+  screening:      http://localhost:8005
+  rnd:            http://localhost:8003
+  license:        http://localhost:8012  # export_license モジュール
+  org_id: "sim-org"
+  bearer: ${AITM_BEARER:-}
+  signing_secret: ${AITM_SIGNING_SECRET:-}
+  test_watchlist_enabled: true  # §4.4 SIM_TEST_WATCHLIST を投入する前提(P2で実装)

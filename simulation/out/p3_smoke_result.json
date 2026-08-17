@@ -1,0 +1,23 @@
+[
+  {
+    "name": "A_existing_customer_full",
+    "engagement_id": "97ad7d99-1b80-4500-9bcd-964e36498b7e",
+    "quote": "issuable",
+    "contract": "blocked_review"
+  },
+  {
+    "name": "B_new_customer",
+    "engagement_id": "ab50a5e2-1677-4eb1-9626-29672c6426a5",
+    "quote": "issuable",
+    "contract": "blocked_review"
+  },
+  {
+    "name": "C_sanctions_hit_blocked",
+    "engagement_id": "c9315c75-2da3-4fe6-8e7c-9da3d73695a8",
+    "screening_outcome": "hit",
+    "quote": "blocked_party",
+    "reason": "取引先「SIM Semiconductor Alpha Corp」が制裁対象(HIT)のため、見積・契約を作成できません",
+    "expected_blocked": true,
+    "actually_blocked": true
+  }
+]

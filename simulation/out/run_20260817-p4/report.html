@@ -1,0 +1,375 @@
+<title>3システム横断シミュレーション 実行レポート</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --surface: #ffffff;
+    --surface-2: #eef0f4;
+    --border: #dde1e8;
+    --text: #1b2029;
+    --text-2: #545c6b;
+    --text-3: #838b9a;
+    --accent: #2a4d8f;
+    --accent-2: #4a6fb5;
+    --good: #1a7f4e;
+    --good-bg: #e6f4ec;
+    --warn: #9a6400;
+    --warn-bg: #fbf1dd;
+    --bad: #b3261e;
+    --bad-bg: #fbe9e8;
+    --info: #3d5a99;
+    --info-bg: #eaeefb;
+    --mono: "SF Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14161c;
+      --surface: #1b1e26;
+      --surface-2: #21252f;
+      --border: #2e3340;
+      --text: #e7e9ee;
+      --text-2: #a6acbb;
+      --text-3: #767e91;
+      --accent: #7ea0e0;
+      --accent-2: #9db6e8;
+      --good: #5ecb92;
+      --good-bg: #14301f;
+      --warn: #e0b155;
+      --warn-bg: #332608;
+      --bad: #ec7a72;
+      --bad-bg: #351917;
+      --info: #8fadea;
+      --info-bg: #1c2740;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14161c;
+    --surface: #1b1e26;
+    --surface-2: #21252f;
+    --border: #2e3340;
+    --text: #e7e9ee;
+    --text-2: #a6acbb;
+    --text-3: #767e91;
+    --accent: #7ea0e0;
+    --accent-2: #9db6e8;
+    --good: #5ecb92;
+    --good-bg: #14301f;
+    --warn: #e0b155;
+    --warn-bg: #332608;
+    --bad: #ec7a72;
+    --bad-bg: #351917;
+    --info: #8fadea;
+    --info-bg: #1c2740;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    margin: 0;
+    padding: 0 0 4rem;
+    line-height: 1.55;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 1.5rem; }
+
+  header.hero {
+    background: linear-gradient(180deg, var(--accent) 0%, var(--accent-2) 100%);
+    color: #fff;
+    padding: 2.6rem 0 2.2rem;
+    margin-bottom: 2rem;
+  }
+  header.hero .eyebrow {
+    font-size: 0.78rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    opacity: 0.85;
+    font-weight: 600;
+  }
+  header.hero h1 {
+    font-size: 1.9rem;
+    margin: 0.4rem 0 0.3rem;
+    font-weight: 700;
+    text-wrap: balance;
+  }
+  header.hero p.sub { margin: 0; opacity: 0.92; font-size: 0.98rem; }
+  header.hero .meta {
+    margin-top: 1.1rem;
+    display: flex;
+    gap: 1.4rem;
+    flex-wrap: wrap;
+    font-size: 0.85rem;
+    opacity: 0.9;
+  }
+  header.hero .meta code { font-family: var(--mono); }
+
+  section { margin-bottom: 2.6rem; }
+  h2 {
+    font-size: 1.15rem;
+    margin: 0 0 0.2rem;
+    padding-bottom: 0.6rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+  }
+  h2 .num { color: var(--text-3); font-weight: 600; font-size: 0.95rem; }
+  h3 { font-size: 0.95rem; margin: 1.4rem 0 0.6rem; color: var(--text-2); }
+  p.lede { color: var(--text-2); font-size: 0.92rem; margin: 0.7rem 0 1.2rem; max-width: 68ch; }
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 0.7rem;
+    margin: 1rem 0;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.9rem 1rem;
+  }
+  .card .label { font-size: 0.74rem; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; }
+  .card .value { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 1.5rem; font-weight: 600; margin-top: 0.15rem; }
+  .card .value small { font-size: 0.85rem; color: var(--text-3); font-weight: 500; }
+
+  .funnel {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .funnel .stage {
+    flex: 1 1 140px;
+    padding: 1rem 1rem;
+    border-right: 1px solid var(--border);
+    position: relative;
+  }
+  .funnel .stage:last-child { border-right: none; }
+  .funnel .stage .n { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 1.6rem; font-weight: 700; color: var(--accent); }
+  .funnel .stage .lbl { font-size: 0.78rem; color: var(--text-2); margin-top: 0.1rem; }
+  .funnel .stage .amt { font-size: 0.72rem; color: var(--text-3); margin-top: 0.35rem; font-family: var(--mono); }
+  .funnel .stage .arrow {
+    position: absolute; right: -0.55rem; top: 50%; transform: translateY(-50%);
+    color: var(--text-3); font-size: 1.1rem; z-index: 1;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.86rem; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  th, td { text-align: left; padding: 0.55rem 0.8rem; border-bottom: 1px solid var(--border); }
+  th { background: var(--surface-2); color: var(--text-2); font-weight: 600; font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.03em; }
+  tr:last-child td { border-bottom: none; }
+  td.num, th.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .tablewrap { overflow-x: auto; border-radius: 10px; }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 0.3rem;
+    padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.76rem; font-weight: 600;
+  }
+  .pill.pass { background: var(--good-bg); color: var(--good); }
+  .pill.fail { background: var(--bad-bg); color: var(--bad); }
+  .pill.warn { background: var(--warn-bg); color: var(--warn); }
+  .pill.info { background: var(--info-bg); color: var(--info); }
+  .pill.skip { background: var(--surface-2); color: var(--text-3); }
+
+  .findings-list { display: flex; flex-direction: column; gap: 0.7rem; }
+  .finding {
+    background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent-2);
+    border-radius: 8px; padding: 0.7rem 0.9rem; font-size: 0.87rem;
+  }
+  .finding .tag { font-family: var(--mono); font-size: 0.72rem; color: var(--accent); font-weight: 700; margin-right: 0.4rem; }
+
+  .bug-grid { display: flex; flex-direction: column; gap: 0.6rem; }
+  .bug {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 0.95rem;
+    display: grid; grid-template-columns: auto 1fr; gap: 0.2rem 0.8rem; font-size: 0.86rem;
+  }
+  .bug .badge { font-family: var(--mono); font-size: 0.7rem; font-weight: 700; color: #fff; background: var(--bad); border-radius: 5px; padding: 0.05rem 0.4rem; height: fit-content; }
+  .bug .badge.sim { background: var(--info); }
+  .bug .file { grid-column: 1 / -1; font-family: var(--mono); font-size: 0.76rem; color: var(--text-3); margin-top: 0.1rem; }
+  .bug .desc { grid-column: 1 / -1; color: var(--text-2); }
+
+  .prose { font-size: 0.92rem; color: var(--text-2); max-width: 72ch; }
+  .prose p { margin: 0.7rem 0; }
+  .prose strong { color: var(--text); }
+
+  .scope-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; }
+  @media (max-width: 640px) { .scope-grid { grid-template-columns: 1fr; } }
+  .scope-col h4 { font-size: 0.82rem; margin: 0 0 0.5rem; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.03em; }
+  .scope-col ul { margin: 0; padding-left: 1.1rem; font-size: 0.87rem; color: var(--text-2); }
+  .scope-col li { margin-bottom: 0.35rem; }
+
+  footer { text-align: center; color: var(--text-3); font-size: 0.78rem; margin-top: 3rem; }
+</style>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">BULK_SIMULATION_SPEC.md &middot; SIM-001</div>
+    <h1>3システム横断 業務フローシミュレーション 実行レポート</h1>
+    <p class="sub">CRM &middot; ERP &middot; AI_TM(貿易管理) — 実システム間の統合を実際に動かして検証</p>
+    <div class="meta">
+      <span>実行日: <code>2026-08-17</code></span>
+      <span>テナント: <code>d9a80db0-…-93cd8e23</code></span>
+      <span>フェーズ: <code>P0〜P4完了</code> / P5(本レポート)</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <section id="summary">
+    <h2><span class="num">1</span> サマリ</h2>
+    <p class="lede">P0(疎通確認)からP4(商談60件のコア経路本実行)まで、CRM・ERP・AI_TMの3実システムを本当に接続して一気通貫のフローを走らせた。過程で実プロダクトコードの不具合4件、シミュレータ自身の不具合4件を発見・修正している。</p>
+    <div class="cards">
+      <div class="card"><div class="label">対象商談</div><div class="value">60</div></div>
+      <div class="card"><div class="label">見積作成</div><div class="value">57</div></div>
+      <div class="card"><div class="label">見積SENT到達</div><div class="value">26</div></div>
+      <div class="card"><div class="label">契約締結(SIGNED)</div><div class="value">11</div></div>
+      <div class="card"><div class="label">出荷・請求完了</div><div class="value">4</div></div>
+      <div class="card"><div class="label">突合チェック</div><div class="value" style="color:var(--good)">4/4<small> 実施分パス</small></div></div>
+      <div class="card"><div class="label">異常検出(既知除く)</div><div class="value" style="color:var(--good)">0<small> 件</small></div></div>
+      <div class="card"><div class="label">発見・修正した不具合</div><div class="value">8<small> 件</small></div></div>
+    </div>
+  </section>
+
+  <section id="funnel">
+    <h2><span class="num">2</span> 商流ファネル</h2>
+    <p class="lede">商談60件を実際にCRMの画面操作(Web UI POST)として起票し、AI_TMの取引審査・ERPの与信/受注/出荷/請求まで実際に流した結果。</p>
+    <div class="funnel">
+      <div class="stage"><div class="n">60</div><div class="lbl">商談</div><div class="amt">&nbsp;</div><div class="arrow">→</div></div>
+      <div class="stage"><div class="n">57</div><div class="lbl">見積作成</div><div class="amt">¥39,105,000</div><div class="arrow">→</div></div>
+      <div class="stage"><div class="n">26</div><div class="lbl">見積SENT</div><div class="amt">審査+与信ゲート通過</div><div class="arrow">→</div></div>
+      <div class="stage"><div class="n">18</div><div class="lbl">契約起票</div><div class="amt">win_rate抽選通過分</div><div class="arrow">→</div></div>
+      <div class="stage"><div class="n">11</div><div class="lbl">契約SIGNED</div><div class="amt">¥3,060,000</div><div class="arrow">→</div></div>
+      <div class="stage"><div class="n">4</div><div class="lbl">ERP転記成功</div><div class="amt">新規顧客7件は既知ギャップで失敗</div><div class="arrow">→</div></div>
+      <div class="stage"><div class="n">4</div><div class="lbl">出荷・請求完了</div><div class="amt">実現収益 ¥1,125,000</div></div>
+    </div>
+    <h3>審査(AI_TM)内訳</h3>
+    <div class="tablewrap"><table>
+      <tr><th>区分</th><th class="num">起票件数</th></tr>
+      <tr><td>仮審査(provisional)</td><td class="num">55</td></tr>
+      <tr><td>正式審査(formal)</td><td class="num">18</td></tr>
+      <tr><td>&nbsp;&nbsp;└ うち clear</td><td class="num">37</td></tr>
+      <tr><td>&nbsp;&nbsp;└ うち needs_review</td><td class="num">9</td></tr>
+      <tr><td>&nbsp;&nbsp;└ その他(未解決・エラー等)</td><td class="num">27</td></tr>
+    </table></div>
+  </section>
+
+  <section id="reconcile">
+    <h2><span class="num">3</span> 突合(reconcile, §8.1)</h2>
+    <p class="lede">60商談規模で実施できた4項目はすべてパス。分納・失注・ERP単独受注が関わる項目は、今回のコア経路スコープでは対象外(§10.3 実行スコープ参照)。</p>
+    <div class="tablewrap"><table>
+      <tr><th>ID</th><th>内容</th><th>結果</th></tr>
+      <tr><td class="num">R-01</td><td>transaction_idの一致(契約↔AI_TM正式審査)</td><td><span class="pill pass">パス</span></td></tr>
+      <tr><td class="num">R-02</td><td>aitm_party_idの一致(ERP登録取引先)</td><td><span class="pill pass">パス</span></td></tr>
+      <tr><td class="num">R-03</td><td>審査案件の重複がないこと</td><td><span class="pill pass">パス</span></td></tr>
+      <tr><td class="num">R-08</td><td>ライセンス枠の整合(警告付きなのに未引当が無いか)</td><td><span class="pill pass">パス</span></td></tr>
+      <tr><td class="num">R-04〜07, R-09, R-10</td><td>契約金額突合・出荷/請求突合・受注残・失注審査状態・ERP単独受注</td><td><span class="pill skip">未実施(コア経路スコープ外)</span></td></tr>
+    </table></div>
+  </section>
+
+  <section id="anomaly">
+    <h2><span class="num">4</span> 異常検出(anomaly, §8.3)</h2>
+    <div class="tablewrap"><table>
+      <tr><th>ID</th><th>内容</th><th>結果</th></tr>
+      <tr><td class="num">A-03</td><td>契約close済みだがERPに受注が存在しない</td><td><span class="pill warn">8件検出</span>(既知の設計ギャップ、§6参照)</td></tr>
+      <tr><td class="num">A-07</td><td>UNKNOWNがCLEARに化けている(フェイルクローズ違反、最重要)</td><td><span class="pill pass">0件</span></td></tr>
+      <tr><td class="num">A-08</td><td>孤児レコード(親を持たない見積・契約・出荷)</td><td><span class="pill pass">0件</span></td></tr>
+      <tr><td class="num">A-01, A-02, A-04〜06</td><td>停止案件・Webhook取りこぼし・出荷未達・ライセンス消費不整合・失注放置</td><td><span class="pill skip">未実施(コア経路スコープ外)</span></td></tr>
+    </table></div>
+  </section>
+
+  <section id="negative">
+    <h2><span class="num">5</span> ネガティブ検証</h2>
+    <p class="lede">「例外が起きなかったこと自体が不具合」という観点での確認。</p>
+    <div class="tablewrap"><table>
+      <tr><th>期待した例外</th><th class="num">意図した件数</th><th class="num">実際</th><th>結果</th></tr>
+      <tr><td>品目マッピング未設定 → UNKNOWNでブロック</td><td class="num">2</td><td class="num">2</td><td><span class="pill pass">一致</span></td></tr>
+      <tr><td>ライセンス枠不足(SIM-LIC-02, CN, 300枠)</td><td class="num">3</td><td class="num">2</td><td><span class="pill warn">1件は無関係なエラーで未到達</span></td></tr>
+      <tr><td>制裁ヒットで見積・契約ブロック</td><td class="num">2アカウント想定</td><td class="num">3件ブロック発生</td><td><span class="pill info">同一取引先が複数回選定されたため</span></td></tr>
+      <tr><td>仮審査needs_review率</td><td class="num">約20%(90件中18件)</td><td class="num">約51%(57件中29件)</td><td><span class="pill warn">取引先プール設計に起因(§6)</span></td></tr>
+    </table></div>
+  </section>
+
+  <section id="bugs">
+    <h2><span class="num">6</span> 発見・修正した不具合(計8件)</h2>
+    <p class="lede">単体テストや型チェックでは検出できない、実システム同士を実際に繋いで初めて分かる種類の不具合。</p>
+    <h3>CRM本体(3件、P3実行時)</h3>
+    <div class="bug-grid">
+      <div class="bug">
+        <span class="badge">CRM</span><div class="file">crm_mvp/services/erp_transcription.py</div>
+        <div class="desc">ERP <code>/sd/sales-orders</code> が必須とする <code>document_date</code> が受注転記ペイロードに欠落し、常に422で失敗 → 追加</div>
+      </div>
+      <div class="bug">
+        <span class="badge">CRM</span><div class="file">crm_mvp/services/erp_transcription.py</div>
+        <div class="desc">同エンドポイントはHMAC署名でなくERP自身のOAuth2認証が必要だった(他の連携先とは方式が異なる) → 認証方式を修正</div>
+      </div>
+      <div class="bug">
+        <span class="badge">CRM</span><div class="file">crm_mvp/api/erp_webhooks.py</div>
+        <div class="desc">ERPからの出荷/請求webhookでJSON由来のfloatをDecimal変換せずORMに渡し、2件目以降の実績計上でTypeErrorクラッシュ → 明示的にDecimal変換</div>
+      </div>
+    </div>
+    <h3>シミュレータ自身(4件、P4実行準備時)</h3>
+    <div class="bug-grid">
+      <div class="bug">
+        <span class="badge sim">SIM</span><div class="file">simulation/src/db.py</div>
+        <div class="desc">DBセッション取得のたびに新規engineを作成しており、60商談規模でPostgreSQLの接続上限を使い切り実行が完全停止 → engineをプロセス内で使い回すよう修正</div>
+      </div>
+      <div class="bug">
+        <span class="badge sim">SIM</span><div class="file">simulation/src/clients/erp.py</div>
+        <div class="desc">ERPのOAuth2トークンは実測1時間弱で失効し、長時間実行で切れる → 15分ごとに自動再取得</div>
+      </div>
+      <div class="bug">
+        <span class="badge sim">SIM</span><div class="file">simulation/src/clients/crm_ui.py</div>
+        <div class="desc">明細数量をfloat文字列で送信しCRM側の <code>int()</code> パースが全滅 → 整数文字列に変換</div>
+      </div>
+      <div class="bug">
+        <span class="badge sim">SIM</span><div class="file">simulation/src/clients/crm_ui.py, scripts/p4_run.py</div>
+        <div class="desc">HTTPステータスの未チェックにより、CRM側の500エラー(原因: シナリオ生成側の "OTHER" ラベルをVARCHAR(2)の国コード欄にそのまま送信)が検知されず後続で謎のNoneType例外に見えていた → ステータスチェック追加 + 国コード写像を修正</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="learnings">
+    <h2><span class="num">7</span> 業務上の示唆</h2>
+    <div class="prose">
+      <p><strong>新規顧客(CRM発生・ERP未登録)の契約は、締結後のERP受注転記が構造的に必ず失敗する。</strong>ERPへ新規取引先を自動登録するステップがどこにも実装されていないため、商談全体の3割弱を占める「新規顧客」象限の契約はすべてこのギャップに直面する。異常検出A-03(8件)として明確に可視化できたのは、検証ロジック自体が正しく機能している証拠でもある。</p>
+      <p><strong>AI_TMの取引審査は自動実行されない。</strong>CRMからの起票APIはケースを作るだけで、判定には「スクリーニング実行」「該非二法令リスト照合」という2段階の明示的なトリガーが必要だった。実運用でこの2段階を誰が(どのタイミングで)呼ぶ設計になっているか、AI_TM側と要確認。加えてAI_TM→CRMへの判定完了webhookは現状存在せず、CRM側は判定完了を能動的に知る手段がない。</p>
+      <p><strong>仮審査needs_review率が設計値(20%)の倍以上(51%)になった。</strong>原因はシミュレータのマスタ設計側にある — SIM_TEST_WATCHLIST該当の6取引先(制裁ヒット・possible_match用に用意したもの)が、通常の「既存顧客」抽選プールにも無差別に混ざっており、例外シナリオ専用のはずの取引先が一般商談にも頻繁に登場した。実システムの不具合ではなく、シミュレーション設計の改善点として記録する。</p>
+      <p><strong>フェイルクローズは機能している。</strong>品目マッピング未設定の2件は意図通り「見積は作成できるが審査ゲートでブロックされる」という安全側の挙動を示し、UNKNOWN判定がCLEAR扱いに化ける事故(A-07)は0件だった。ライセンス枠不足も実際のAI_TM残枠データ(SIM-LIC-02: 300枠)に基づく本物の不足警告として確認できた。</p>
+    </div>
+  </section>
+
+  <section id="scope">
+    <h2><span class="num">8</span> 実施範囲</h2>
+    <div class="scope-grid">
+      <div class="scope-col">
+        <h4>今回実施</h4>
+        <ul>
+          <li>P0: 3システム起動確認・安全ガード・署名往復</li>
+          <li>P1: イベント生成骨組み(dry-run、件数完全一致)</li>
+          <li>P2: マスタ投入(取引先28社・品目15・許可証4・ウォッチリスト6)</li>
+          <li>P3: 1件フル経路実証 + 3件スモーク(例外系含む)</li>
+          <li>P4: 60商談のコア経路本実行(見積→契約→ERP転記→出荷→請求)</li>
+          <li>品目マッピング未設定・ライセンス枠不足・制裁ヒットの例外系</li>
+        </ul>
+      </div>
+      <div class="scope-col">
+        <h4>今回未実施(次回以降)</h4>
+        <ul>
+          <li>見積の複数回改訂とreview_key_hash不変時の再審査省略の実証</li>
+          <li>審査鮮度切れ(30日)の再現(§11.3)</li>
+          <li>継続監視ヒット・みなし輸出・返品・ERP単独受注</li>
+          <li>R&amp;D起点商談(IF-14/26)の自動起票フロー</li>
+          <li>業務KPI(審査待ちキュー推移・リードタイム分布等、§8.2の一部)</li>
+          <li>取引先プールを例外専用/通常用に分離する設計改善</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<footer>simulation/out/findings_p0_p3.md, findings_p4.md に詳細ログあり</footer>

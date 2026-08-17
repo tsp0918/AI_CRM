@@ -1,0 +1,261 @@
+{
+  "accounts": {
+    "SIM-ACC-001": {
+      "crm_account_id": "cb62bd3b-3bee-4bce-8c11-3c9be8d488ac",
+      "erp_bp_code": "SIM-BP-0000001",
+      "aitm_party_id": "7bc23f5a-8ae6-4bca-be75-a68a9f26a3d2",
+      "legal_name": "SIM Materials Gamma Ltd"
+    },
+    "SIM-ACC-002": {
+      "crm_account_id": "b6a8aede-88a5-4c95-af6c-32ea13ef3d55",
+      "erp_bp_code": "SIM-BP-0000002",
+      "aitm_party_id": "fef6095e-b351-4675-af1f-866d8f02a2a2",
+      "legal_name": "SIM Monitoring Zeta Corp"
+    },
+    "SIM-ACC-003": {
+      "crm_account_id": "8afda080-1711-4827-a4f0-7bb059ef0702",
+      "erp_bp_code": "SIM-BP-0000003",
+      "aitm_party_id": "97c87985-2a79-4fd0-945e-6ffe3016e7c0",
+      "legal_name": "SIM Trading 01 Co., Ltd."
+    },
+    "SIM-ACC-004": {
+      "crm_account_id": "f364f37b-928d-4bdd-9426-6dd2e9a28b76",
+      "erp_bp_code": "SIM-BP-0000004",
+      "aitm_party_id": "da69bc7e-3720-452d-8924-93cc66cfafa0",
+      "legal_name": "SIM Trading 02 Co., Ltd."
+    },
+    "SIM-ACC-005": {
+      "crm_account_id": "c743702b-cd7e-4d8b-aac6-885eba87b9d9",
+      "erp_bp_code": "SIM-BP-0000005",
+      "aitm_party_id": "791690b1-738e-4732-960a-b9905b47529f",
+      "legal_name": "SIM Trading 03 Co., Ltd."
+    },
+    "SIM-ACC-006": {
+      "crm_account_id": "49a63978-43fd-4dac-a0f1-5c8db406cb42",
+      "erp_bp_code": "SIM-BP-0000006",
+      "aitm_party_id": "b9463846-bda8-46d3-be56-6058bed84cbb",
+      "legal_name": "SIM Trading 04 Co., Ltd."
+    },
+    "SIM-ACC-007": {
+      "crm_account_id": "dcfff2b3-3484-4134-bcbb-c4318f58ea31",
+      "erp_bp_code": "SIM-BP-0000007",
+      "aitm_party_id": "d4cec10c-0a05-4b26-9a91-2d5a699e089d",
+      "legal_name": "SIM Trading 05 Co., Ltd."
+    },
+    "SIM-ACC-008": {
+      "crm_account_id": "555de3e5-d1a4-402a-832d-12f9cc4fc5bc",
+      "erp_bp_code": "SIM-BP-0000008",
+      "aitm_party_id": "05dbec8f-d50b-47cf-a0d3-d81f439e14d3",
+      "legal_name": "SIM Trading 06 Co., Ltd."
+    },
+    "SIM-ACC-009": {
+      "crm_account_id": "fb768975-2bb4-4f64-b59b-e0e3061257ac",
+      "erp_bp_code": "SIM-BP-0000009",
+      "aitm_party_id": "f274a806-6e6b-4471-a7b4-20131c2a08a4",
+      "legal_name": "SIM Components Delta GmbH"
+    },
+    "SIM-ACC-010": {
+      "crm_account_id": "88821784-2ef5-48e6-b75d-5e5f17369288",
+      "erp_bp_code": "SIM-BP-0000010",
+      "aitm_party_id": "c975c6ab-02eb-477e-96b8-2a809dc5107d",
+      "legal_name": "SIM Overseas TW Trading Ltd."
+    },
+    "SIM-ACC-011": {
+      "crm_account_id": "c0c5c2af-aacf-47cf-80f3-0fd54c144b47",
+      "erp_bp_code": "SIM-BP-0000011",
+      "aitm_party_id": "f3c3ba27-b8dc-4d86-81b1-022dc19f4f78",
+      "legal_name": "SIM Overseas US Trading Ltd."
+    },
+    "SIM-ACC-012": {
+      "crm_account_id": "d0c19722-02b0-4030-ad0c-582b0e86a910",
+      "erp_bp_code": "SIM-BP-0000012",
+      "aitm_party_id": "68756f89-7f11-4cb9-b504-0f11334bf494",
+      "legal_name": "SIM Overseas DE Trading Ltd."
+    },
+    "SIM-ACC-013": {
+      "crm_account_id": "af4296c0-034f-44fe-a9dc-a08312da0379",
+      "erp_bp_code": "SIM-BP-0000013",
+      "aitm_party_id": "81c65325-2a87-438a-a4be-f4aa235f8886",
+      "legal_name": "SIM Overseas SG Trading Ltd."
+    },
+    "SIM-ACC-014": {
+      "crm_account_id": "35b1bd14-39a2-416d-b6f2-f89a0eb44ee1",
+      "erp_bp_code": null,
+      "aitm_party_id": "8fc839eb-2bbd-403e-adb2-d4e9a87cc406",
+      "legal_name": "SIM Semiconductor Alpha Corp"
+    },
+    "SIM-ACC-015": {
+      "crm_account_id": "64afdf43-6f95-46b3-889e-b7a4bf1b1f19",
+      "erp_bp_code": null,
+      "aitm_party_id": "e5a3d710-8c48-41d0-9d73-ac6b90eef113",
+      "legal_name": "SIM Systems Epsilon Pte"
+    },
+    "SIM-ACC-016": {
+      "crm_account_id": "8cb7c7c9-4dda-4417-8d4e-95c69ea04ae8",
+      "erp_bp_code": null,
+      "aitm_party_id": "57d0e328-d05e-40fd-b10b-c2f2319546e3",
+      "legal_name": "SIM New Customer 01 K.K."
+    },
+    "SIM-ACC-017": {
+      "crm_account_id": "048d4087-9c29-4489-a8da-31137481e6ca",
+      "erp_bp_code": null,
+      "aitm_party_id": "34d2fbca-b966-4675-85f6-ce53e9230071",
+      "legal_name": "SIM New Customer 02 K.K."
+    },
+    "SIM-ACC-018": {
+      "crm_account_id": "8634ff29-81e4-41d6-a1ed-ce59de247024",
+      "erp_bp_code": null,
+      "aitm_party_id": "2579a084-8777-42d3-a78e-ebd995626506",
+      "legal_name": "SIM New Customer 03 K.K."
+    },
+    "SIM-ACC-019": {
+      "crm_account_id": "5f25eb31-774d-424c-bd46-56ba98b7abd2",
+      "erp_bp_code": null,
+      "aitm_party_id": "4ddd04c9-0ca7-48ce-b693-b3fcca10aba5",
+      "legal_name": "SIM New Customer 04 K.K."
+    },
+    "SIM-ACC-020": {
+      "crm_account_id": "942377d4-2619-4970-8b03-46127a83c52d",
+      "erp_bp_code": null,
+      "aitm_party_id": "bb9715c9-cedd-4920-9fce-7a0acfef2380",
+      "legal_name": "SIM New Customer 05 K.K."
+    },
+    "SIM-ACC-021": {
+      "crm_account_id": "884ff214-7623-4153-9692-c73bd963a557",
+      "erp_bp_code": null,
+      "aitm_party_id": "8204dcab-3809-4d3f-88b9-4e0d67927a10",
+      "legal_name": "SIM Trading House 01 Corp."
+    },
+    "SIM-ACC-022": {
+      "crm_account_id": "23e30fdf-d471-4857-b4d2-1de7278beec4",
+      "erp_bp_code": null,
+      "aitm_party_id": "e4ec604a-2e6b-4b88-8df2-da2a547aba73",
+      "legal_name": "SIM Precision Beta Industries"
+    },
+    "SIM-ACC-023": {
+      "crm_account_id": "3db07df7-6e17-4fb2-940c-669fa39be32d",
+      "erp_bp_code": null,
+      "aitm_party_id": "63884b52-5b6f-42d3-91d2-652372c5c23c",
+      "legal_name": "SIM Trading House 02 Corp."
+    },
+    "SIM-ACC-024": {
+      "crm_account_id": "a013a0a3-0763-4964-9344-590edceb3801",
+      "erp_bp_code": null,
+      "aitm_party_id": "53857234-66e6-4d89-aff0-58fd06de07ca",
+      "legal_name": "SIM End User Two Manufacturing"
+    },
+    "SIM-ACC-025": {
+      "crm_account_id": "b2f6abf2-ee0d-4fa5-80cf-c3ed04824042",
+      "erp_bp_code": null,
+      "aitm_party_id": "4de22f8f-16df-4aff-9bc1-cf0a7f2a98e7",
+      "legal_name": "SIM Trading House 03 Corp."
+    },
+    "SIM-ACC-026": {
+      "crm_account_id": "1179be60-3000-4247-8bf0-52fa0634cffd",
+      "erp_bp_code": null,
+      "aitm_party_id": "f505d4ba-5440-4547-b728-57ae8f002897",
+      "legal_name": "SIM End User Three Manufacturing"
+    },
+    "SIM-ACC-027": {
+      "crm_account_id": "32439233-0b89-42a5-929e-0169947ed6fb",
+      "erp_bp_code": null,
+      "aitm_party_id": "7283cd31-0573-4f76-9ccc-f0b2c636feb4",
+      "legal_name": "SIM R&D Origin 01 Inc."
+    },
+    "SIM-ACC-028": {
+      "crm_account_id": "5ac6f35b-754b-46c5-899c-30a8f3a5b136",
+      "erp_bp_code": null,
+      "aitm_party_id": "f4ac6576-e936-4974-9e94-dfa893369d33",
+      "legal_name": "SIM R&D Origin 02 Inc."
+    }
+  },
+  "products": {
+    "SIM-PROD-01": {
+      "crm_product_id": "c8a7defe-1dc7-426a-8e2e-4c8f80d93842",
+      "erp_material_code": null
+    },
+    "SIM-PROD-02": {
+      "crm_product_id": "c0ebddb3-c18d-45ce-96ef-23565cfd5861",
+      "erp_material_code": null
+    },
+    "SIM-PROD-03": {
+      "crm_product_id": "9e519d6f-0a1e-4eb6-bc7e-e610cdfe2966",
+      "erp_material_code": "SIM-MAT-0003"
+    },
+    "SIM-PROD-04": {
+      "crm_product_id": "563203ac-3595-40a5-83bf-4ed81090c955",
+      "erp_material_code": "SIM-MAT-0004"
+    },
+    "SIM-PROD-05": {
+      "crm_product_id": "59a3a67d-bcc4-4be3-918a-3f1cdf97e993",
+      "erp_material_code": "SIM-MAT-0005"
+    },
+    "SIM-PROD-06": {
+      "crm_product_id": "323f2125-78ad-4dab-ac53-8fe3ec09046d",
+      "erp_material_code": "SIM-MAT-0006"
+    },
+    "SIM-PROD-07": {
+      "crm_product_id": "3bb13bef-b9e1-4c17-a2d0-d7c16163ea09",
+      "erp_material_code": "SIM-MAT-0007"
+    },
+    "SIM-PROD-08": {
+      "crm_product_id": "d5b600d4-774f-4dae-9856-c64dd57c63d5",
+      "erp_material_code": "SIM-MAT-0008"
+    },
+    "SIM-PROD-09": {
+      "crm_product_id": "b72dc16d-2073-4e12-aef6-db00fab8c099",
+      "erp_material_code": "SIM-MAT-0009"
+    },
+    "SIM-PROD-10": {
+      "crm_product_id": "413d3123-4f65-4b7b-b7fd-971bbe94f062",
+      "erp_material_code": "SIM-MAT-0010"
+    },
+    "SIM-PROD-11": {
+      "crm_product_id": "5f94fcd2-33f1-4ffe-b9be-10260a9c432a",
+      "erp_material_code": "SIM-MAT-0011"
+    },
+    "SIM-PROD-12": {
+      "crm_product_id": "d63fa9c3-27c8-4a28-8a51-b6d35fceade7",
+      "erp_material_code": "SIM-MAT-0012"
+    },
+    "SIM-PROD-13": {
+      "crm_product_id": "65f69ee2-b52f-4909-8137-e9f00e9415f2",
+      "erp_material_code": "SIM-MAT-0013"
+    },
+    "SIM-PROD-14": {
+      "crm_product_id": "de65b087-486e-4931-adf4-efcd0db45899",
+      "erp_material_code": "SIM-MAT-0014"
+    },
+    "SIM-PROD-15": {
+      "crm_product_id": "d8fdac79-93ca-4718-b4e3-9e1e76458ad5",
+      "erp_material_code": "SIM-MAT-0015"
+    }
+  },
+  "licenses": {
+    "SIM-LIC-01": {
+      "license_nos": [
+        "SIM-LIC-01-KR",
+        "SIM-LIC-01-TW"
+      ],
+      "product_code": "SIM-MAT-0007"
+    },
+    "SIM-LIC-02": {
+      "license_nos": [
+        "SIM-LIC-02"
+      ],
+      "product_code": "SIM-MAT-0007"
+    },
+    "SIM-LIC-03": {
+      "license_nos": [
+        "SIM-LIC-03"
+      ],
+      "product_code": "SIM-MAT-0011"
+    },
+    "SIM-LIC-04": {
+      "license_nos": [
+        "SIM-LIC-04"
+      ],
+      "product_code": "SIM-MAT-0013"
+    }
+  }
+}
