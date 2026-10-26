@@ -321,6 +321,9 @@
       <span class="badge">{{ q.status }}</span>
       {% set rc = review_cases_by_quote.get(q.id) %}
       {% if rc %}<span class="badge badge-review-{{ rc.status }}">審査: {{ rc.status }}</span>{% endif %}
+      {% if rc and rc.detail and rc.detail.get('override') %}
+      <span class="badge badge-override" title="承認者: {{ rc.detail['override'].get('approver_name') }} / 有効期限: {{ rc.detail['override'].get('valid_until') }}">⚠ 例外承認(override)</span>
+      {% endif %}
       {% set cp_outcome = compliance_by_account_id.get(engagement.account_id) %}
       {% if cp_outcome %}<span class="badge badge-compliance-{{ cp_outcome }}">取引先: {{ cp_outcome }}</span>{% endif %}
       {% if q.end_user_account_id %}
@@ -399,6 +402,9 @@
       <span class="badge">{{ c.status }}</span>
       {% set rc = review_cases_by_contract.get(c.id) %}
       {% if rc %}<span class="badge badge-review-{{ rc.status }}">審査: {{ rc.status }}</span>{% endif %}
+      {% if rc and rc.detail and rc.detail.get('override') %}
+      <span class="badge badge-override" title="承認者: {{ rc.detail['override'].get('approver_name') }} / 有効期限: {{ rc.detail['override'].get('valid_until') }}">⚠ 例外承認(override)</span>
+      {% endif %}
       {% set cp_outcome = compliance_by_account_id.get(engagement.account_id) %}
       {% if cp_outcome %}<span class="badge badge-compliance-{{ cp_outcome }}">取引先: {{ cp_outcome }}</span>{% endif %}
       {% if c.end_user_account_id %}

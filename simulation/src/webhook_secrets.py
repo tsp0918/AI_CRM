@@ -36,6 +36,26 @@ WEBHOOK_SECRETS: dict[str, dict[str, str]] = {
         "secret_env": "AITM_MONITORING_WEBHOOK_SECRET", "secret": "sim-aitm-monitoring-secret-dev",
         "path": "/webhooks/contract-monitoring",
     },
+    # 2026-10-26: AI_TM側の指示でoverride/compliance/sanctionsの3経路は
+    # 共通シークレット"dev-crm-signing-secret-000"・共通Bearer
+    # "dev-crm-outbound-bearer-000"(いずれも開発環境デフォルト)で統一する
+    # 方針と確認済み(AI_TM側がBearer+HMAC-SHA256の二重認証に対応)。
+    # 本番移行時は両方とも強いランダム値に変更し、両側で値を同期すること。
+    "aitm_override": {
+        "bearer_env": "AITM_OVERRIDE_WEBHOOK_BEARER", "bearer": "dev-crm-outbound-bearer-000",
+        "secret_env": "AITM_OVERRIDE_WEBHOOK_SECRET", "secret": "dev-crm-signing-secret-000",
+        "path": "/webhooks/override-applied",
+    },
+    "aitm_compliance": {
+        "bearer_env": "AITM_COMPLIANCE_WEBHOOK_BEARER", "bearer": "dev-crm-outbound-bearer-000",
+        "secret_env": "AITM_COMPLIANCE_WEBHOOK_SECRET", "secret": "dev-crm-signing-secret-000",
+        "path": "/webhooks/compliance-judgment",
+    },
+    "aitm_sanctions": {
+        "bearer_env": "AITM_SANCTIONS_WEBHOOK_BEARER", "bearer": "dev-crm-outbound-bearer-000",
+        "secret_env": "AITM_SANCTIONS_WEBHOOK_SECRET", "secret": "dev-crm-signing-secret-000",
+        "path": "/webhooks/sanctions-list-updated",
+    },
     "erp": {
         "bearer_env": "ERP_WEBHOOK_BEARER", "bearer": "sim-erp-webhook-bearer-dev",
         "secret_env": "ERP_WEBHOOK_SECRET", "secret": "sim-erp-webhook-secret-dev",

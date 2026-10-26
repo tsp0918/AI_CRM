@@ -70,15 +70,26 @@ class TestSubmitComplianceCheck:
 
 
 class TestComplianceJudgmentWebhook:
+    BEARER = "aitm-compliance-bearer"
+    SECRET = "aitm-compliance-secret"
+
+    @pytest.fixture(autouse=True)
+    def _env(self, monkeypatch):
+        monkeypatch.setenv("AITM_COMPLIANCE_WEBHOOK_BEARER", self.BEARER)
+        monkeypatch.setenv("AITM_COMPLIANCE_WEBHOOK_SECRET", self.SECRET)
+
     def test_upserts_compliance_status(self, api_client, db_session, tenant_id):
         account, _ = create_account_and_engagement(db_session, tenant_id)
         db_session.commit()
 
-        resp = api_client.post("/webhooks/compliance-judgment", json={
-            "account_id": str(account.id), "check_type": "export_control",
-            "outcome": "hit", "provider": "ai_tm",
-            "provider_request_id": "MOCK-EVT-1",
-        })
+        resp = _signed_post(
+            api_client, "/webhooks/compliance-judgment", {
+                "account_id": str(account.id), "check_type": "export_control",
+                "outcome": "hit", "provider": "ai_tm",
+                "provider_request_id": "MOCK-EVT-1",
+            },
+            bearer=self.BEARER, secret=self.SECRET,
+        )
         assert resp.status_code == 204
 
         status = db_session.query(ComplianceStatus).filter_by(
@@ -90,6 +101,14 @@ class TestComplianceJudgmentWebhook:
 
 
 class TestSanctionsListUpdatedWebhook:
+    BEARER = "aitm-sanctions-bearer"
+    SECRET = "aitm-sanctions-secret"
+
+    @pytest.fixture(autouse=True)
+    def _env(self, monkeypatch):
+        monkeypatch.setenv("AITM_SANCTIONS_WEBHOOK_BEARER", self.BEARER)
+        monkeypatch.setenv("AITM_SANCTIONS_WEBHOOK_SECRET", self.SECRET)
+
     def test_flags_account_and_creates_action_item_for_open_engagement(
         self, api_client, db_session, tenant_id,
     ):
@@ -98,12 +117,15 @@ class TestSanctionsListUpdatedWebhook:
         )
         db_session.commit()
 
-        resp = api_client.post("/webhooks/sanctions-list-updated", json={
-            "hits": [{
-                "account_id": str(account.id), "matched_list": "OFAC_SDN",
-                "matched_entity_name": "テスト株式会社",
-            }],
-        })
+        resp = _signed_post(
+            api_client, "/webhooks/sanctions-list-updated", {
+                "hits": [{
+                    "account_id": str(account.id), "matched_list": "OFAC_SDN",
+                    "matched_entity_name": "テスト株式会社",
+                }],
+            },
+            bearer=self.BEARER, secret=self.SECRET,
+        )
         assert resp.status_code == 200
         body = resp.json()
         # レスポンスには業務データ(対象アカウント・商談等)を含めない —
@@ -131,12 +153,15 @@ class TestSanctionsListUpdatedWebhook:
         )
         db_session.commit()
 
-        resp = api_client.post("/webhooks/sanctions-list-updated", json={
-            "hits": [{
-                "account_id": str(account.id), "matched_list": "OFAC_SDN",
-                "matched_entity_name": "テスト株式会社",
-            }],
-        })
+        resp = _signed_post(
+            api_client, "/webhooks/sanctions-list-updated", {
+                "hits": [{
+                    "account_id": str(account.id), "matched_list": "OFAC_SDN",
+                    "matched_entity_name": "テスト株式会社",
+                }],
+            },
+            bearer=self.BEARER, secret=self.SECRET,
+        )
         assert resp.status_code == 200
         assert resp.json() == {"status": "processed", "hits_processed": 1}
 

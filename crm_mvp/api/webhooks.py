@@ -1,13 +1,13 @@
 """外部システムからの Webhook 受信(HANDOVER.md §5 Phase5, item 20,21)。
 
-本番では CRM_WEBHOOK_BEARER 相当の署名/トークン検証が必須
-(CRM_INTEGRATION_HANDOVER.md §11 参照)。この MVP では未実装 —
-X-Tenant-Id ヘッダのみで宛先テナントを決めており、送信元の真正性は
-検証していない。本番投入前に必ず認証を追加すること。
+全エンドポイントが`verify_webhook`(署名・Bearer検証)に接続済み
+(2026-10-25、`/compliance-judgment`・`/sanctions-list-updated`の2つが
+X-Tenant-Idのみで送信元を検証していない状態だったのを最後に接続した)。
 """
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import datetime, timezone
 
@@ -22,7 +22,7 @@ from ..enums import (
 )
 from ..models import Account, ComplianceStatus, Contract, Engagement, ReviewCase
 from ..services.action_items import create_manual_action_item
-from .deps import get_session, get_tenant_id, get_tenant_scoped_session
+from .deps import get_session
 from .webhook_security import record_webhook_event, verify_webhook
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -40,21 +40,49 @@ class ComplianceJudgmentPayload(BaseModel):
 
 
 @router.post("/compliance-judgment", status_code=204)
-def receive_compliance_judgment(
-    body: ComplianceJudgmentPayload,
-    tenant_id: uuid.UUID = Depends(get_tenant_id),
-    session: Session = Depends(get_tenant_scoped_session),
-) -> None:
+async def receive_compliance_judgment(request: Request, session: Session = Depends(get_session)) -> None:
+    """2026-10-25: 署名検証(`verify_webhook`)に接続した(クロスリポジトリ
+    レビューで、本エンドポイントが`X-Tenant-Id`のみで送信元の真正性を
+    検証していない点が指摘されたための対応)。パースは引き続き
+    `ComplianceJudgmentPayload`で行うが、生ボディを先に署名検証してから
+    パースする(他7エンドポイントと同じ順序)。"""
+    ctx = await verify_webhook(
+        request, source="aitm", secret_env="AITM_COMPLIANCE_WEBHOOK_SECRET",
+        bearer_env="AITM_COMPLIANCE_WEBHOOK_BEARER",
+    )
+    session.execute(
+        text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
+        {"tenant_id": str(ctx.tenant_id)},
+    )
+    body = ComplianceJudgmentPayload.model_validate(ctx.payload)
+
+    # `event_id`はDB上VARCHAR(64)。account_id(UUID36字)+check_type+
+    # provider_request_idを素朴に連結すると送信元のIDが長い場合に
+    # 64字を超えてDataErrorになる(2026-10-26、実際にBEARER検証確認中に
+    # 発生)ため、フォールバック時はハッシュ化して長さを固定する。
+    if ctx.payload.get("event_id"):
+        event_id = str(ctx.payload["event_id"])[:64]
+    else:
+        raw_key = f"{body.account_id}:{body.check_type.value}:{body.provider_request_id}"
+        event_id = f"cj:{hashlib.sha256(raw_key.encode()).hexdigest()[:48]}"
+    event, is_new = record_webhook_event(
+        session, ctx.tenant_id, event_id=event_id, source_system="aitm",
+        event_type="compliance.judgment", payload=ctx.payload,
+    )
+    if not is_new:
+        session.commit()
+        return
+
     status = session.execute(
         select(ComplianceStatus).where(
-            ComplianceStatus.tenant_id == tenant_id,
+            ComplianceStatus.tenant_id == ctx.tenant_id,
             ComplianceStatus.account_id == body.account_id,
             ComplianceStatus.check_type == body.check_type,
         )
     ).scalar_one_or_none()
     if status is None:
         status = ComplianceStatus(
-            tenant_id=tenant_id, account_id=body.account_id,
+            tenant_id=ctx.tenant_id, account_id=body.account_id,
             check_type=body.check_type,
         )
         session.add(status)
@@ -101,18 +129,39 @@ SANCTIONS_ACTION_ASSIGNEE = "輸出管理チーム"
 
 
 @router.post("/sanctions-list-updated", response_model=WebhookReceiptOut)
-def receive_sanctions_list_update(
-    body: SanctionsListUpdatedPayload,
-    tenant_id: uuid.UUID = Depends(get_tenant_id),
-    session: Session = Depends(get_tenant_scoped_session),
-) -> WebhookReceiptOut:
+async def receive_sanctions_list_update(request: Request, session: Session = Depends(get_session)) -> WebhookReceiptOut:
     """制裁リスト更新時の遡及再評価(HANDOVER.md §5 item21)。
 
     ヒットしたアカウントの ComplianceStatus を HIT に更新し、進行中
     (CLOSED_* でない)の Engagement ごとに ActionItem を起票する。
     レスポンスには業務データを含めない(WebhookReceiptOut参照) — 「誰が
     見ても分かる形」の通知はActionItemとして画面上に残す。
+
+    2026-10-25: 署名検証(`verify_webhook`)に接続した。複数取引先を一括
+    更新する経路のため優先的に対応(クロスリポジトリレビューで指摘)。
+    併せて`record_webhook_event`によるイベント単位の冪等性も追加した
+    (署名検証が無かった間はリトライ時に重複ActionItemが積まれていた)。
     """
+    ctx = await verify_webhook(
+        request, source="aitm", secret_env="AITM_SANCTIONS_WEBHOOK_SECRET",
+        bearer_env="AITM_SANCTIONS_WEBHOOK_BEARER",
+    )
+    session.execute(
+        text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
+        {"tenant_id": str(ctx.tenant_id)},
+    )
+    body = SanctionsListUpdatedPayload.model_validate(ctx.payload)
+    tenant_id = ctx.tenant_id
+
+    event_id = str(ctx.payload.get("event_id") or f"sanctions:{hash(tuple(sorted(str(h.account_id) for h in body.hits)))}")
+    event, is_new = record_webhook_event(
+        session, tenant_id, event_id=event_id, source_system="aitm",
+        event_type="sanctions.list_updated", payload=ctx.payload,
+    )
+    if not is_new:
+        session.commit()
+        return WebhookReceiptOut(hits_processed=0)
+
     now = datetime.now(timezone.utc)
 
     for hit in body.hits:
@@ -243,6 +292,91 @@ async def receive_aitm_review_result(
             task=f"取引審査ケース {case_no} の判定結果: {status.value}。内容を確認してください。",
             assigned_by="system:aitm-review-webhook",
         )
+
+    session.commit()
+    return {"status": "processed"}
+
+
+@router.post("/override-applied")
+async def receive_override_applied(
+    request: Request, session: Session = Depends(get_session),
+) -> dict:
+    """AI_TMからのコンプライアンス・オーバーライド適用通知(2026-10-25、IF-15)。
+
+    `/webhooks/aitm/review-result`とは別チャネル — オーバーライドは
+    revisionベースの判定更新ではなく、責任者承認による例外的な通過なので、
+    「誰が・どの権限で・いつまで」を`ReviewCase.detail`に残し、監査証跡
+    として`engagement_detail.html`から確認できるようにする(通常のAI判定
+    結果と見分けがつかなくなることを避ける — 2026-10-25のクロスリポジトリ
+    レビューで「CRM側がoverride経由の通過を一切記録・表示していない」と
+    判明したための対応)。
+
+    このwebhookが適用した時点でケースはCLEARとして扱う(オーバーライドの
+    目的自体が「rejected/needs_reviewだった取引を責任者承認で通す」ため)。
+    正式審査へのoverride継承を防ぐかどうかはAI_TM側の判断領域であり、
+    ここでは関与しない(CRMは`parent_case_no`経由でAI_TM採番のcase_noを
+    引き渡すだけ)。
+    """
+    ctx = await verify_webhook(
+        request, source="aitm", secret_env="AITM_OVERRIDE_WEBHOOK_SECRET",
+        bearer_env="AITM_OVERRIDE_WEBHOOK_BEARER",
+    )
+    session.execute(
+        text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
+        {"tenant_id": str(ctx.tenant_id)},
+    )
+
+    case_no = str(ctx.payload.get("case_no", ""))
+    override_id = ctx.payload.get("override_id")
+    event_id = str(ctx.payload.get("event_id") or f"{case_no}:override:{override_id}")
+
+    event, is_new = record_webhook_event(
+        session, ctx.tenant_id, event_id=event_id, source_system="aitm",
+        event_type="override.applied", payload=ctx.payload,
+    )
+    if not is_new:
+        session.commit()
+        return {"status": "duplicate"}
+
+    review_case = session.execute(
+        select(ReviewCase).where(
+            ReviewCase.tenant_id == ctx.tenant_id, ReviewCase.case_no == case_no,
+        )
+    ).scalar_one_or_none()
+    if review_case is None:
+        event.result = WebhookEventResult.ERROR
+        event.error = f"該当する ReviewCase が見つかりません: {case_no}"
+        session.commit()
+        return {"status": "processed"}
+
+    override_detail = {
+        "override_id": override_id,
+        "scope": ctx.payload.get("scope"),
+        "overridden_by": ctx.payload.get("overridden_by"),
+        "approver_name": ctx.payload.get("approver_name"),
+        "valid_until": ctx.payload.get("valid_until"),
+        "department_head_approval": ctx.payload.get("department_head_approval"),
+        "transaction_id": ctx.payload.get("transaction_id"),
+    }
+    review_case.status = ReviewCaseStatus.CLEAR
+    review_case.detail = {**(review_case.detail or {}), "override": override_detail}
+    review_case.decided_at = datetime.now(timezone.utc)
+    valid_until_raw = ctx.payload.get("valid_until")
+    if valid_until_raw:
+        review_case.valid_until = datetime.fromisoformat(valid_until_raw)
+
+    create_manual_action_item(
+        session, ctx.tenant_id, review_case.engagement_id,
+        assigned_to=REVIEW_ACTION_ASSIGNEE,
+        task=(
+            f"取引審査ケース {case_no} は責任者承認(オーバーライド)により通過しました。"
+            f"承認者: {override_detail['approver_name']}、"
+            f"適用範囲: {override_detail['scope']}、"
+            f"有効期限: {override_detail['valid_until']}。"
+            "通常のAI判定ではなく例外承認である点に留意してください。"
+        ),
+        assigned_by="system:aitm-override-webhook",
+    )
 
     session.commit()
     return {"status": "processed"}

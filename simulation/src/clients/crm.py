@@ -66,6 +66,24 @@ class CrmWebhookClient:
         }
         return self._client_for("aitm_review").post(WEBHOOK_SECRETS["aitm_review"]["path"], payload)
 
+    def send_override_applied(
+        self, *, case_no: str, transaction_id: int | str | None, override_id: int | str,
+        scope: str, overridden_by: str, approver_name: str,
+        valid_until: str | None = None, department_head_approval: bool = False,
+    ) -> httpx.Response:
+        payload = {
+            "case_no": case_no, "transaction_id": transaction_id, "override_id": override_id,
+            "scope": scope, "overridden_by": overridden_by, "approver_name": approver_name,
+            "valid_until": valid_until, "department_head_approval": department_head_approval,
+        }
+        return self._client_for("aitm_override").post(WEBHOOK_SECRETS["aitm_override"]["path"], payload)
+
+    def send_compliance_judgment(self, payload: dict) -> httpx.Response:
+        return self._client_for("aitm_compliance").post(WEBHOOK_SECRETS["aitm_compliance"]["path"], payload)
+
+    def send_sanctions_list_updated(self, payload: dict) -> httpx.Response:
+        return self._client_for("aitm_sanctions").post(WEBHOOK_SECRETS["aitm_sanctions"]["path"], payload)
+
     def send_erp_material_updated(self, payload: dict) -> httpx.Response:
         return self._client_for("erp").post(_ERP_WEBHOOK_PATHS["material_updated"], payload)
 

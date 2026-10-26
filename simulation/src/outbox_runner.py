@@ -34,9 +34,11 @@ REQUIRED_ENV = {
     "ERP_SALES_ORDER_BEARER": _DUMMY, "ERP_SALES_ORDER_SECRET": _DUMMY,
     "AITM_LICENSE_URL": "http://localhost:8012",
     "AITM_LICENSE_BEARER": _DUMMY, "AITM_LICENSE_SECRET": _DUMMY,
-    # AITM_DEEMED_EXPORT_URL: 実エンドポイント未確認(2026-08-16 E2E確認の
-    # 「確認できなかった項目」)のため未設定のままにする — dispatcherが
-    # 登録されず、該当Outboxメッセージはpendingのまま残る(fail loud)。
+    # 2026-10-25、AI_TM側に`POST /api/deemed-export/events`(ai_validation
+    # モジュール、8011)が実装されたことを確認(2026-08-16 E2E確認時点では
+    # 「確認できなかった項目」だった)。
+    "AITM_DEEMED_EXPORT_URL": "http://localhost:8011",
+    "AITM_DEEMED_EXPORT_BEARER": _DUMMY, "AITM_DEEMED_EXPORT_SECRET": _DUMMY,
 }
 
 _initialized = False
