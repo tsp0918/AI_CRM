@@ -8,6 +8,7 @@ X-Tenant-Idのみで送信元を検証していない状態だったのを最後
 from __future__ import annotations
 
 import hashlib
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -20,12 +21,42 @@ from ..enums import (
     ComplianceCheckType, ComplianceOutcome, ReviewCaseStatus, Stage,
     WebhookEventResult,
 )
-from ..models import Account, ComplianceStatus, Contract, Engagement, ReviewCase
+from ..models import Account, ComplianceStatus, Contract, Engagement, ReviewCase, WebhookEvent
 from ..services.action_items import create_manual_action_item
-from .deps import get_session
+from .deps import get_session, get_tenant_id, get_tenant_scoped_session
 from .webhook_security import record_webhook_event, verify_webhook
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
+logger = logging.getLogger(__name__)
+
+
+def _mark_event_result(event, result: WebhookEventResult, *, error: str | None = None) -> None:
+    """ERROR/STALEは受信側で黙って握ると送信元からは成功に見えてしまう
+    (`/webhooks/*`は常に200/204/201を返すため)。2026-10-26クロスリポジトリ
+    レビューで、これが原因でIF-10の取り落としに誰も気づけない状態だったと
+    判明したため、ログに残す(A-3、監視で拾えるようにする)。"""
+    event.result = result
+    if error:
+        event.error = error
+    if result in (WebhookEventResult.STALE, WebhookEventResult.ERROR):
+        logger.warning(
+            "webhook %s/%s -> %s (event_id=%s%s)",
+            event.source_system, event.event_type, result.value, event.event_id,
+            f", error={error}" if error else "",
+        )
+
+
+def _parse_valid_until(raw: str) -> datetime:
+    """`ReviewCase.valid_until`は`DateTime(timezone=True)`列。AI_TMの
+    overrideは`YYYY-MM-DD`の日付文字列(tzinfo無し)で送ってくることがあり、
+    `datetime.fromisoformat`がnaive datetimeを返すとセッションのタイム
+    ゾーンに依存して解釈され実質ずれる(2026-10-26クロスリポジトリ
+    レビューで指摘)。naiveな場合はUTCとみなしてtzinfoを補う。
+    """
+    dt = datetime.fromisoformat(raw)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 class ComplianceJudgmentPayload(BaseModel):
@@ -153,7 +184,15 @@ async def receive_sanctions_list_update(request: Request, session: Session = Dep
     body = SanctionsListUpdatedPayload.model_validate(ctx.payload)
     tenant_id = ctx.tenant_id
 
-    event_id = str(ctx.payload.get("event_id") or f"sanctions:{hash(tuple(sorted(str(h.account_id) for h in body.hits)))}")
+    # `hash()`は文字列/タプルに対してプロセスごとにソルトされる
+    # (PYTHONHASHSEED既定はrandom)ため、CRM再起動後に同じ通知が再送される
+    # と別のevent_idになり冪等性が効かない(2026-10-26クロスリポジトリ
+    # レビューで指摘)。compliance-judgment側と同じhashlib.sha256に揃える。
+    if ctx.payload.get("event_id"):
+        event_id = str(ctx.payload["event_id"])[:64]
+    else:
+        raw_key = ":".join(sorted(str(h.account_id) for h in body.hits))
+        event_id = f"sanctions:{hashlib.sha256(raw_key.encode()).hexdigest()[:48]}"
     event, is_new = record_webhook_event(
         session, tenant_id, event_id=event_id, source_system="aitm",
         event_type="sanctions.list_updated", payload=ctx.payload,
@@ -262,13 +301,12 @@ async def receive_aitm_review_result(
         )
     ).scalar_one_or_none()
     if review_case is None:
-        event.result = WebhookEventResult.ERROR
-        event.error = f"該当する ReviewCase が見つかりません: {case_no}"
+        _mark_event_result(event, WebhookEventResult.ERROR, error=f"該当する ReviewCase が見つかりません: {case_no}")
         session.commit()
         return {"status": "processed"}
 
     if revision <= review_case.revision:
-        event.result = WebhookEventResult.STALE
+        _mark_event_result(event, WebhookEventResult.STALE)
         session.commit()
         return {"status": "processed"}
 
@@ -283,7 +321,7 @@ async def receive_aitm_review_result(
     review_case.decided_at = datetime.now(timezone.utc)
     valid_until_raw = ctx.payload.get("valid_until")
     if valid_until_raw:
-        review_case.valid_until = datetime.fromisoformat(valid_until_raw)
+        review_case.valid_until = _parse_valid_until(valid_until_raw)
 
     if status in _UNRESOLVED_STATUSES:
         create_manual_action_item(
@@ -344,8 +382,7 @@ async def receive_override_applied(
         )
     ).scalar_one_or_none()
     if review_case is None:
-        event.result = WebhookEventResult.ERROR
-        event.error = f"該当する ReviewCase が見つかりません: {case_no}"
+        _mark_event_result(event, WebhookEventResult.ERROR, error=f"該当する ReviewCase が見つかりません: {case_no}")
         session.commit()
         return {"status": "processed"}
 
@@ -363,7 +400,7 @@ async def receive_override_applied(
     review_case.decided_at = datetime.now(timezone.utc)
     valid_until_raw = ctx.payload.get("valid_until")
     if valid_until_raw:
-        review_case.valid_until = datetime.fromisoformat(valid_until_raw)
+        review_case.valid_until = _parse_valid_until(valid_until_raw)
 
     create_manual_action_item(
         session, ctx.tenant_id, review_case.engagement_id,
@@ -440,8 +477,7 @@ async def receive_aitm_party_event(
 
     account = _resolve_party_account(session, ctx.tenant_id, ctx.payload)
     if account is None:
-        event.result = WebhookEventResult.ERROR
-        event.error = "該当するAccountが見つかりません"
+        _mark_event_result(event, WebhookEventResult.ERROR, error="該当するAccountが見つかりません")
         session.commit()
         return {"status": "processed"}
 
@@ -568,8 +604,7 @@ async def receive_deemed_export_risk(
 
     account = _resolve_party_account(session, ctx.tenant_id, ctx.payload)
     if account is None:
-        event.result = WebhookEventResult.ERROR
-        event.error = "該当するAccountが見つかりません"
+        _mark_event_result(event, WebhookEventResult.ERROR, error="該当するAccountが見つかりません")
         session.commit()
         return {"status": "processed"}
 
@@ -642,8 +677,7 @@ async def receive_contract_monitoring(
     contract_id = ctx.payload.get("crm_contract_id")
     contract = session.get(Contract, uuid.UUID(contract_id)) if contract_id else None
     if contract is None or contract.tenant_id != ctx.tenant_id:
-        event.result = WebhookEventResult.ERROR
-        event.error = "該当するContractが見つかりません"
+        _mark_event_result(event, WebhookEventResult.ERROR, error="該当するContractが見つかりません")
         session.commit()
         return {"status": "processed"}
 
@@ -661,3 +695,40 @@ async def receive_contract_monitoring(
 
     session.commit()
     return {"status": "processed"}
+
+
+class WebhookEventOut(BaseModel):
+    id: uuid.UUID
+    event_id: str
+    source_system: str
+    event_type: str
+    result: str
+    error: str | None
+    received_at: datetime
+    processed_at: datetime | None
+
+
+@router.get("/webhook-events", response_model=list[WebhookEventOut])
+def list_webhook_events(
+    result: str | None = None,
+    source_system: str | None = None,
+    event_type: str | None = None,
+    limit: int = 50,
+    tenant_id: uuid.UUID = Depends(get_tenant_id),
+    session: Session = Depends(get_tenant_scoped_session),
+) -> list[WebhookEvent]:
+    """受信Webhookの処理結果をJSONで参照する(2026-10-26、A-3)。
+
+    `/ui/integration-status`はHTMLのみでテスト/自動検証から読めないため、
+    「IF-10がSTALEで握られていないこと」等をPostmanのテストスクリプトから
+    直接アサートできるようにする(クロスリポジトリレビューで指摘)。
+    """
+    query = select(WebhookEvent).where(WebhookEvent.tenant_id == tenant_id)
+    if result:
+        query = query.where(WebhookEvent.result == result)
+    if source_system:
+        query = query.where(WebhookEvent.source_system == source_system)
+    if event_type:
+        query = query.where(WebhookEvent.event_type == event_type)
+    query = query.order_by(WebhookEvent.received_at.desc()).limit(min(limit, 200))
+    return session.execute(query).scalars().all()
