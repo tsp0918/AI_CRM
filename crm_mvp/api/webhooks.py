@@ -698,6 +698,12 @@ async def receive_contract_monitoring(
 
 
 class WebhookEventOut(BaseModel):
+    # ORMオブジェクト(WebhookEvent)をそのまま返すため必須。FastAPI 0.141系は
+    # response_model検証時にfrom_attributes=Trueを内部的に付与するため実害は
+    # 出ていなかったが、将来のFastAPIバージョン変更や単体でのmodel_validate()
+    # 呼び出しに対しても安全にするため明示する。
+    model_config = {"from_attributes": True}
+
     id: uuid.UUID
     event_id: str
     source_system: str
