@@ -39,6 +39,10 @@ REQUIRED_ENV = {
     # 「確認できなかった項目」だった)。
     "AITM_DEEMED_EXPORT_URL": "http://localhost:8011",
     "AITM_DEEMED_EXPORT_BEARER": _DUMMY, "AITM_DEEMED_EXPORT_SECRET": _DUMMY,
+    # 2026-10-27、契約書§4-1 A案(aitm.party.resolve)。platform-coreは
+    # AITM_SCREENING_URL(8005)とは別モジュールなので既定8000で分ける。
+    "AITM_PLATFORM_URL": "http://localhost:8000",
+    "AITM_PLATFORM_BEARER": _DUMMY, "AITM_PLATFORM_SECRET": _DUMMY,
 }
 
 _initialized = False
@@ -56,6 +60,7 @@ def ensure_dispatchers_registered() -> None:
     from crm_mvp.services.deemed_export import register_deemed_export_dispatchers
     from crm_mvp.services.erp_transcription import register_erp_transcription_dispatchers
     from crm_mvp.services.license import register_aitm_license_dispatchers
+    from crm_mvp.services.party_compliance import register_aitm_party_dispatchers
     from crm_mvp.services.review_case import register_aitm_dispatchers
 
     register_aitm_dispatchers()
@@ -63,6 +68,7 @@ def ensure_dispatchers_registered() -> None:
     register_erp_transcription_dispatchers()
     register_aitm_license_dispatchers()
     register_deemed_export_dispatchers()
+    register_aitm_party_dispatchers()
     _initialized = True
 
 

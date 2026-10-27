@@ -49,7 +49,10 @@ class ReviewCase(Base, UUIDPk, Timestamped, Provenance, TenantScoped):
     # IF-10ペイロードの revision。これより新しい通知のみ適用する(古い通知は破棄)。
     revision: Mapped[int] = mapped_column(Integer, default=0)
     valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    provider_request_id: Mapped[str | None] = mapped_column(String(128))
+    # AI_TM採番のcase_no。IF-10/IF-15の受信側がこの列で引く(2026-10-27、
+    # CRM採番のcase_no列で引いていた取り違えを修正。常時ルックアップに
+    # 使われるためindexを付与)。
+    provider_request_id: Mapped[str | None] = mapped_column(String(128), index=True)
     detail: Mapped[dict] = mapped_column(JSONB, default=dict)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

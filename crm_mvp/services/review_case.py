@@ -275,6 +275,15 @@ _REVIEW_ENDPOINTS = {
     "aitm.review.submit.formal": "/api/crm/formal-review",
 }
 
+# AI_TMのagent_judgment_status → CRMのReviewCaseStatus(2026-10-27、B-4)。
+# 未知の値・null(審査未完了)はマッピングしない — fail-closedでPENDINGの
+# ままにし、IF-10の到着を待つ(clearに倒すと未判定のままゲートが開く)。
+_AITM_JUDGMENT_TO_STATUS = {
+    "approved": ReviewCaseStatus.CLEAR,
+    "needs_review": ReviewCaseStatus.NEEDS_REVIEW,
+    "blocked": ReviewCaseStatus.BLOCKED,
+}
+
 
 def _dispatch_aitm_review_submit(session: Session, message: OutboxMessage) -> OutboxResult:
     """`register_aitm_dispatchers()`経由でOutbox処理から呼ばれる送信関数。
@@ -315,6 +324,21 @@ def _dispatch_aitm_review_submit(session: Session, message: OutboxMessage) -> Ou
         valid_until_raw = data.get("valid_until")
         if valid_until_raw:
             review_case.valid_until = datetime.fromisoformat(valid_until_raw)
+
+        # 2026-10-27: 仮審査判定を継承できた正式審査(smooth_completion)は、
+        # IF-10を待たずに同期レスポンスで確定させる(待つと契約ゲートが
+        # 開かない、B-4)。
+        if data.get("smooth_completion"):
+            mapped = _AITM_JUDGMENT_TO_STATUS.get(data.get("provisional_judgment") or "")
+            if mapped is not None:
+                review_case.status = mapped
+                review_case.decided_at = datetime.now(timezone.utc)
+                review_case.detail = {
+                    **(review_case.detail or {}),
+                    "smooth_completion": True,
+                    "inherited_from": data.get("inherited_from"),
+                    "provisional_judgment": data.get("provisional_judgment"),
+                }
     return result
 
 

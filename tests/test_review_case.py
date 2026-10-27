@@ -8,10 +8,13 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from crm_mvp.enums import ArtifactType, OutboxStatus, ReviewType
+import pytest
+
+from crm_mvp.enums import ArtifactType, OutboxResult, OutboxStatus, ReviewCaseStatus, ReviewType
 from crm_mvp.models import ActionItem, ErpMaterial, OutboxMessage, Product, ReviewCase
 from crm_mvp.services import pricing as pr
 from crm_mvp.services import quoting as qt
+from crm_mvp.services import review_case as review_case_module
 from crm_mvp.services.review_case import (
     build_review_key_hash, check_review_clearance, submit_formal_review,
     submit_provisional_review,
@@ -250,6 +253,124 @@ class TestSubmitFormalReview:
             tenant_id=tenant_id, engagement_id=engagement.id,
         ).one()
         assert "品目マッピング" in action_item.reason
+
+
+class _StubResponse:
+    def __init__(self, status_code: int, data: dict | None = None):
+        self.status_code = status_code
+        self._data = data or {}
+        self.content = b"{}" if data is not None else b""
+
+    def json(self):
+        return self._data
+
+
+class _StubSignedClient:
+    """`SignedClient`の代わり。レスポンスを固定して返すだけ。"""
+
+    last_payload = None
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def post(self, path, payload, request_id=None):
+        type(self).last_payload = payload
+        return type(self).response
+
+    def close(self):
+        pass
+
+
+class TestDispatchAitmReviewSubmitSmoothCompletion:
+    """`_dispatch_aitm_review_submit`のB-4対応(2026-10-27)。
+    仮審査から引き継げた正式審査は、IF-10を待たずにこの関数内で
+    agent_judgment_status -> ReviewCaseStatus を写像して確定させる。"""
+
+    def _make_case(self, db_session, tenant_id, engagement, **overrides) -> ReviewCase:
+        defaults = dict(
+            tenant_id=tenant_id, case_no="CRM-C-2026-0001",
+            review_type=ReviewType.FORMAL, artifact_type=ArtifactType.CONTRACT,
+            engagement_id=engagement.id, review_key_hash="deadbeef",
+            status=ReviewCaseStatus.PENDING, revision=0, detail={"existing": "kept"},
+        )
+        defaults.update(overrides)
+        case = ReviewCase(**defaults)
+        db_session.add(case)
+        db_session.flush()
+        return case
+
+    def _dispatch(self, monkeypatch, db_session, tenant_id, case, response_data):
+        monkeypatch.setenv("AITM_REVIEW_URL", "http://stub")
+        monkeypatch.setenv("AITM_REVIEW_BEARER", "stub-bearer")
+        monkeypatch.setenv("AITM_REVIEW_SECRET", "stub-secret")
+        _StubSignedClient.response = _StubResponse(200, response_data)
+        monkeypatch.setattr(review_case_module, "SignedClient", _StubSignedClient)
+
+        message = OutboxMessage(
+            tenant_id=tenant_id, target_system="aitm", kind="aitm.review.submit.formal",
+            payload={}, status=OutboxStatus.PENDING, ref_type="review_case", ref_id=str(case.id),
+            written_by="test",
+        )
+        db_session.add(message)
+        db_session.flush()
+        result = review_case_module._dispatch_aitm_review_submit(db_session, message)
+        db_session.commit()
+        db_session.refresh(case)
+        return result
+
+    def test_smooth_completion_approved_maps_to_clear(self, monkeypatch, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        case = self._make_case(db_session, tenant_id, engagement)
+
+        result = self._dispatch(monkeypatch, db_session, tenant_id, case, {
+            "case_no": "CRM-FORMAL-000001", "smooth_completion": True,
+            "inherited_from": "CRM-PROV-000001", "provisional_judgment": "approved",
+        })
+
+        assert result == OutboxResult.SENT
+        assert case.provider_request_id == "CRM-FORMAL-000001"
+        assert case.status == ReviewCaseStatus.CLEAR
+        assert case.decided_at is not None
+        assert case.detail["existing"] == "kept"  # 上書きではなくマージ
+        assert case.detail["smooth_completion"] is True
+        assert case.detail["inherited_from"] == "CRM-PROV-000001"
+
+    def test_smooth_completion_blocked_maps_to_blocked(self, monkeypatch, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        case = self._make_case(db_session, tenant_id, engagement)
+
+        self._dispatch(monkeypatch, db_session, tenant_id, case, {
+            "case_no": "CRM-FORMAL-000002", "smooth_completion": True,
+            "provisional_judgment": "blocked",
+        })
+
+        assert case.status == ReviewCaseStatus.BLOCKED
+
+    def test_smooth_completion_with_unknown_judgment_stays_pending(
+        self, monkeypatch, db_session, tenant_id,
+    ):
+        """fail-closed: 未知の値はPENDINGのまま(clearに倒さない)。"""
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        case = self._make_case(db_session, tenant_id, engagement)
+
+        self._dispatch(monkeypatch, db_session, tenant_id, case, {
+            "case_no": "CRM-FORMAL-000003", "smooth_completion": True,
+            "provisional_judgment": None,
+        })
+
+        assert case.status == ReviewCaseStatus.PENDING
+        assert case.decided_at is None
+
+    def test_no_smooth_completion_leaves_status_untouched(self, monkeypatch, db_session, tenant_id):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        case = self._make_case(db_session, tenant_id, engagement)
+
+        self._dispatch(monkeypatch, db_session, tenant_id, case, {
+            "case_no": "CRM-FORMAL-000004", "smooth_completion": False,
+        })
+
+        assert case.status == ReviewCaseStatus.PENDING
+        assert case.provider_request_id == "CRM-FORMAL-000004"
 
 
 class TestCheckReviewClearance:

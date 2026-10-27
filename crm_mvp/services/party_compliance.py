@@ -10,17 +10,30 @@ HIT」「エンドユーザーがHIT」の2条件のみをブロック対象と�
 `ComplianceOutcome.HIT`のみを判定する(`NEEDS_REVIEW`/`BLOCKED`/`UNKNOWN`は
 既存enumの意味を変えずに済むよう、今回のスコープには含めない — 将来の
 拡張課題)。
+
+2026-10-27追記(契約書CONTRACT_webhook_payloads.md §4-1 A案): 上記の
+「新しい外部連携は不要」はゲート判定自体の話。別の問題として、CRM起点の
+取引先が`POST /api/parties/resolve`を一度も呼ばれないため、AI_TM側の
+`plat_party`・`MonitoringSubscription`が作られず継続監視に載らない
+(`party.linked`をAI_TM側が実装しても対象のpartyが無ければ発火しない)。
+これを埋めるため`enqueue_party_resolve()`を追加した — `run_compliance_check`
+がSANCTIONSチェックを初めて走らせるタイミングから呼ぶ。
 """
 
 from __future__ import annotations
 
+import os
 import uuid
+from datetime import datetime, timedelta, timezone
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..enums import ComplianceCheckType, ComplianceOutcome
-from ..models import Account, ComplianceStatus
+from ..enums import ComplianceCheckType, ComplianceOutcome, OutboxResult
+from ..models import Account, ComplianceStatus, OutboxMessage
+from .integration_client import SignedClient
+from .outbox import classify_http_response, enqueue_outbox, register_dispatcher
 
 # 表示用の重大度順(重大 -> 軽微)。ブロック判定にはHITのみ使うが、UIバッジは
 # 「その取引先の中で最も重大な状態」を一目で示したいためこの順序を使う。
@@ -119,3 +132,79 @@ def build_party_ref(account: Account) -> dict:
         "address": None,
         "aliases": [],
     }
+
+
+MONITOR_WINDOW_DAYS = 365
+
+
+def enqueue_party_resolve(
+    session: Session, tenant_id: uuid.UUID, account: Account, *, actor: str,
+) -> OutboxMessage:
+    """AI_TM(platform-core)に`party_id`を解決させ、`Account.aitm_party_id`を
+    埋めるためのOutbox起票(2026-10-27、契約書§4-1 A案)。
+
+    `run_compliance_check`がそのAccountに対してSANCTIONSチェックを初めて
+    走らせるタイミングから呼ぶ。`enable_watch=true`で送るため、AI_TM側は
+    既存の`MonitoringSubscription`を冪等に再利用する(重複購読は増えない、
+    platform-core/routers/party.py:102-118)。
+    """
+    ref = build_party_ref(account)
+    monitor_until = (datetime.now(timezone.utc) + timedelta(days=MONITOR_WINDOW_DAYS)).date().isoformat()
+    payload = {
+        "legal_name": ref["legal_name"],
+        "country_code": ref["country"],
+        "party_type": "company",
+        "source_system": "crm",
+        "external_id": str(account.id),
+        "tenant_id": str(tenant_id),
+        "enable_watch": True,
+        "monitor_until": monitor_until,
+    }
+    return enqueue_outbox(
+        session, tenant_id, target_system="aitm", kind="aitm.party.resolve",
+        payload=payload, ref_type="account", ref_id=str(account.id), actor=actor,
+    )
+
+
+def _dispatch_aitm_party_resolve(session: Session, message: OutboxMessage) -> OutboxResult:
+    """`register_aitm_party_dispatchers()`経由でOutbox処理から呼ばれる。
+    `review_case.py`の`_dispatch_aitm_review_submit`がレスポンスの
+    `case_no`を`provider_request_id`に書き戻すのと同じ形で、
+    レスポンスの`party_id`を`Account.aitm_party_id`に書き戻す。
+    """
+    account = session.execute(
+        select(Account).where(
+            Account.tenant_id == message.tenant_id, Account.id == uuid.UUID(message.ref_id),
+        )
+    ).scalar_one_or_none()
+    if account is None:
+        return OutboxResult.FAILED_NO_RETRY
+
+    client = SignedClient(
+        os.environ.get("AITM_PLATFORM_URL"), message.tenant_id,
+        bearer_env="AITM_PLATFORM_BEARER", secret_env="AITM_PLATFORM_SECRET",
+    )
+    try:
+        response = client.post("/api/parties/resolve", message.payload, request_id=str(message.id))
+    except httpx.HTTPError as exc:
+        return classify_http_response(None, exc=exc)
+    finally:
+        client.close()
+
+    result = classify_http_response(response)
+    if result == OutboxResult.SENT and response.content:
+        data = response.json()
+        party_id = data.get("party_id")
+        if party_id:
+            account.aitm_party_id = party_id
+    return result
+
+
+def register_aitm_party_dispatchers() -> None:
+    """`AITM_PLATFORM_URL`が設定されている場合のみdispatcherを登録する
+    (`register_aitm_dispatchers`と同じフェイルクローズパターン。
+    platform-core(既定8000)は`AITM_SCREENING_URL`(8005)とは別モジュール
+    なので環境変数を分けている)。
+    """
+    if os.environ.get("AITM_PLATFORM_URL"):
+        register_dispatcher("aitm.party.resolve", _dispatch_aitm_party_resolve)

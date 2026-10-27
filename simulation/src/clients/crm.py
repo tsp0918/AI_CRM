@@ -84,6 +84,9 @@ class CrmWebhookClient:
     def send_sanctions_list_updated(self, payload: dict) -> httpx.Response:
         return self._client_for("aitm_sanctions").post(WEBHOOK_SECRETS["aitm_sanctions"]["path"], payload)
 
+    def send_sanctions_sync_completed(self, payload: dict) -> httpx.Response:
+        return self._client_for("aitm_sanctions").post("/webhooks/sanctions-sync-completed", payload)
+
     def send_erp_material_updated(self, payload: dict) -> httpx.Response:
         return self._client_for("erp").post(_ERP_WEBHOOK_PATHS["material_updated"], payload)
 

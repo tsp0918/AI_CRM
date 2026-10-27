@@ -68,6 +68,66 @@ class TestSubmitComplianceCheck:
         )
         assert first.json()["idempotency_key"] == second.json()["idempotency_key"]
 
+    def test_sanctions_check_enqueues_aitm_party_resolve(
+        self, api_client, db_session, tenant_id,
+    ):
+        """2026-10-27(契約書§4-1 A案): 取引先にサンクション系チェックを
+        初めて走らせるタイミングでparty解決をAI_TMに依頼する(B-3の依存:
+        party.linkedが来るまでAccount.aitm_party_idが埋まらずscreening.alertの
+        取引先解決が成立しないため)。"""
+        from crm_mvp.models import OutboxMessage
+
+        account, _ = create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        api_client.post(
+            f"/accounts/{account.id}/compliance-checks",
+            json={"check_type": "sanctions"},
+        )
+
+        message = db_session.query(OutboxMessage).filter_by(
+            tenant_id=tenant_id, kind="aitm.party.resolve",
+        ).one()
+        assert message.payload["external_id"] == str(account.id)
+        assert message.payload["legal_name"] == account.name
+        assert message.payload["enable_watch"] is True
+
+    def test_credit_check_does_not_enqueue_party_resolve(
+        self, api_client, db_session, tenant_id,
+    ):
+        """SANCTIONS以外のチェック種別ではparty解決は不要。"""
+        from crm_mvp.models import OutboxMessage
+
+        account, _ = create_account_and_engagement(db_session, tenant_id)
+        db_session.commit()
+
+        api_client.post(
+            f"/accounts/{account.id}/compliance-checks",
+            json={"check_type": "credit"},
+        )
+
+        assert db_session.query(OutboxMessage).filter_by(
+            tenant_id=tenant_id, kind="aitm.party.resolve",
+        ).count() == 0
+
+    def test_does_not_enqueue_again_once_aitm_party_id_known(
+        self, api_client, db_session, tenant_id,
+    ):
+        from crm_mvp.models import OutboxMessage
+
+        account, _ = create_account_and_engagement(db_session, tenant_id)
+        account.aitm_party_id = "PLAT-PARTY-001"
+        db_session.commit()
+
+        api_client.post(
+            f"/accounts/{account.id}/compliance-checks",
+            json={"check_type": "sanctions"},
+        )
+
+        assert db_session.query(OutboxMessage).filter_by(
+            tenant_id=tenant_id, kind="aitm.party.resolve",
+        ).count() == 0
+
 
 class TestComplianceJudgmentWebhook:
     BEARER = "aitm-compliance-bearer"
@@ -191,8 +251,12 @@ class TestAitmReviewResultWebhook:
         monkeypatch.setenv("AITM_REVIEW_WEBHOOK_SECRET", self.SECRET)
 
     def _make_review_case(self, db_session, tenant_id, engagement, **overrides) -> ReviewCase:
+        # AI_TMはcase_noとして自分の採番値(provider_request_id)を送ってくる
+        # (receive_aitm_review_resultはprovider_request_idで引く、2026-10-27
+        # の取り違え修正)。テストでも実際の送受信契約と同じ値を使う。
         defaults = dict(
             tenant_id=tenant_id, case_no="CRM-Q-2026-0001",
+            provider_request_id="CRM-PROV-000001",
             review_type=ReviewType.PROVISIONAL, artifact_type=ArtifactType.QUOTE,
             engagement_id=engagement.id, review_key_hash="deadbeef",
             status="pending", revision=0,
@@ -219,7 +283,7 @@ class TestAitmReviewResultWebhook:
 
         resp = _signed_post(
             api_client, "/webhooks/aitm/review-result",
-            {"case_no": case.case_no, "revision": 1, "status": "clear",
+            {"case_no": case.provider_request_id, "revision": 1, "status": "clear",
              "valid_until": (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()},
             bearer=self.BEARER, secret=self.SECRET,
         )
@@ -241,7 +305,7 @@ class TestAitmReviewResultWebhook:
 
         resp = _signed_post(
             api_client, "/webhooks/aitm/review-result",
-            {"case_no": case.case_no, "revision": 1, "status": "hit"},
+            {"case_no": case.provider_request_id, "revision": 1, "status": "hit"},
             bearer=self.BEARER, secret=self.SECRET,
         )
         assert resp.status_code == 200
@@ -252,14 +316,14 @@ class TestAitmReviewResultWebhook:
             tenant_id=tenant_id, engagement_id=engagement.id,
         ).one()
         assert action_item.assigned_to == "輸出管理チーム"
-        assert case.case_no in action_item.reason
+        assert case.provider_request_id in action_item.reason
 
     def test_duplicate_event_is_a_no_op(self, api_client, db_session, tenant_id):
         _, engagement = create_account_and_engagement(db_session, tenant_id)
         case = self._make_review_case(db_session, tenant_id, engagement)
         db_session.commit()
 
-        payload = {"case_no": case.case_no, "revision": 1, "status": "hit"}
+        payload = {"case_no": case.provider_request_id, "revision": 1, "status": "hit"}
         first = _signed_post(
             api_client, "/webhooks/aitm/review-result", payload,
             bearer=self.BEARER, secret=self.SECRET,
@@ -282,7 +346,7 @@ class TestAitmReviewResultWebhook:
 
         resp = _signed_post(
             api_client, "/webhooks/aitm/review-result",
-            {"case_no": case.case_no, "revision": 2, "status": "hit", "event_id": "stale-evt"},
+            {"case_no": case.provider_request_id, "revision": 2, "status": "hit", "event_id": "stale-evt"},
             bearer=self.BEARER, secret=self.SECRET,
         )
         assert resp.status_code == 200
@@ -299,3 +363,89 @@ class TestAitmReviewResultWebhook:
         )
         assert resp.status_code == 200
         assert resp.json() == {"status": "processed"}
+
+    def test_crm_case_no_does_not_match_lookup(self, api_client, db_session, tenant_id):
+        """2026-10-27の取り違え修正の回帰テスト: AI_TMはprovider_request_id
+        (AI_TM採番値)をcase_noとして送る。CRM採番のcase_no列(fallback無し)
+        を送っても該当ReviewCaseが見つかってはならない。"""
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        case = self._make_review_case(db_session, tenant_id, engagement)
+        db_session.commit()
+
+        resp = _signed_post(
+            api_client, "/webhooks/aitm/review-result",
+            {"case_no": case.case_no, "revision": 1, "status": "clear", "event_id": "crm-case-no-evt"},
+            bearer=self.BEARER, secret=self.SECRET,
+        )
+        assert resp.status_code == 200
+
+        db_session.refresh(case)
+        assert case.status == "pending"  # 誤ってマッチして更新されていない
+        assert case.revision == 0
+
+
+class TestOverrideAppliedWebhook:
+    BEARER = "dev-crm-outbound-bearer-000"
+    SECRET = "dev-crm-signing-secret-000"
+
+    @pytest.fixture(autouse=True)
+    def _env(self, monkeypatch):
+        monkeypatch.setenv("AITM_OVERRIDE_WEBHOOK_BEARER", self.BEARER)
+        monkeypatch.setenv("AITM_OVERRIDE_WEBHOOK_SECRET", self.SECRET)
+
+    def _make_review_case(self, db_session, tenant_id, engagement, **overrides) -> ReviewCase:
+        defaults = dict(
+            tenant_id=tenant_id, case_no="CRM-C-2026-0001",
+            provider_request_id="CRM-FORMAL-000001",
+            review_type=ReviewType.FORMAL, artifact_type=ArtifactType.CONTRACT,
+            engagement_id=engagement.id, review_key_hash="deadbeef",
+            status="needs_review", revision=1,
+        )
+        defaults.update(overrides)
+        case = ReviewCase(**defaults)
+        db_session.add(case)
+        db_session.flush()
+        return case
+
+    def test_override_applied_clears_case_by_provider_request_id(
+        self, api_client, db_session, tenant_id,
+    ):
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        case = self._make_review_case(db_session, tenant_id, engagement)
+        db_session.commit()
+
+        resp = _signed_post(
+            api_client, "/webhooks/override-applied",
+            {
+                "case_no": case.provider_request_id, "transaction_id": "T-1",
+                "override_id": 5000, "scope": "single_transaction",
+                "overridden_by": "officer-1", "approver_name": "部長 山田",
+                "valid_until": "2027-03-31", "department_head_approval": True,
+            },
+            bearer=self.BEARER, secret=self.SECRET,
+        )
+        assert resp.status_code == 200
+
+        db_session.refresh(case)
+        assert case.status == "clear"
+        assert case.detail["override"]["approver_name"] == "部長 山田"
+        action_item = db_session.query(ActionItem).filter_by(
+            tenant_id=tenant_id, engagement_id=engagement.id,
+        ).one()
+        assert case.provider_request_id in action_item.reason
+
+    def test_crm_case_no_does_not_match_lookup(self, api_client, db_session, tenant_id):
+        """IF-10と同じ取り違えがIF-15にも存在した。回帰テスト。"""
+        _, engagement = create_account_and_engagement(db_session, tenant_id)
+        case = self._make_review_case(db_session, tenant_id, engagement)
+        db_session.commit()
+
+        resp = _signed_post(
+            api_client, "/webhooks/override-applied",
+            {"case_no": case.case_no, "override_id": 1},
+            bearer=self.BEARER, secret=self.SECRET,
+        )
+        assert resp.status_code == 200
+
+        db_session.refresh(case)
+        assert case.status == "needs_review"  # 誤ってマッチして更新されていない

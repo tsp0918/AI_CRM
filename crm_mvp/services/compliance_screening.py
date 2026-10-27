@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from ..enums import ComplianceCheckType
 from ..models import Account, ComplianceStatus
 from ..ports.screening import MockScreeningAdapter, ScreeningPort
+from .party_compliance import enqueue_party_resolve
 
 FRESHNESS_WINDOW_DAYS = 180
 
@@ -60,6 +61,14 @@ def run_compliance_check(
     status.checked_at = now
     status.valid_until = now + timedelta(days=FRESHNESS_WINDOW_DAYS)
     session.flush()
+
+    # 2026-10-27(契約書§4-1 A案): サンクション系チェックを初めて走らせる
+    # 取引先はAI_TMのplatform-coreにもparty解決を依頼する。これをしないと
+    # Account.aitm_party_idが埋まらず、AI_TM側の継続監視(MonitoringSubscription)
+    # にも載らない(party_compliance.py冒頭の2026-10-27追記参照)。
+    if check_type == ComplianceCheckType.SANCTIONS and account.aitm_party_id is None:
+        enqueue_party_resolve(session, tenant_id, account, actor="system:compliance-screening")
+
     return status
 
 

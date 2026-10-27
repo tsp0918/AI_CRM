@@ -47,8 +47,13 @@ def drive_and_push_review_result(
 
     final_status = str(data.get("status") or "").lower()
     mapped = _AITM_STATUS_TO_REVIEW_STATUS.get(final_status, ReviewCaseStatus.NEEDS_REVIEW)
+    # 2026-10-27: 実AI_TMはcase_noとして自分の採番値(aitm_case_no、CRM側は
+    # provider_request_idに保存)を送る。CRM採番のcase_noを送ると
+    # receive_aitm_review_resultが該当ReviewCaseを見つけられない
+    # (クロスリポジトリレビューで発覚した取り違えと同じ事故をここでも
+    # 起こしていた)。
     crm_wh.send_review_result(
-        case_no=case_no, revision=revision, status=mapped.value,
+        case_no=aitm_case_no, revision=revision, status=mapped.value,
         valid_until=data.get("valid_until"), detail={"aitm_raw_status": final_status},
     )
     return data

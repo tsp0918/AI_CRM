@@ -76,7 +76,15 @@ async def receive_compliance_judgment(request: Request, session: Session = Depen
     レビューで、本エンドポイントが`X-Tenant-Id`のみで送信元の真正性を
     検証していない点が指摘されたための対応)。パースは引き続き
     `ComplianceJudgmentPayload`で行うが、生ボディを先に署名検証してから
-    パースする(他7エンドポイントと同じ順序)。"""
+    パースする(他7エンドポイントと同じ順序)。
+
+    2026-10-27 非推奨(契約書§3): AI_TM側にこのエンドポイントへの送信
+    実装が存在せず、今後も作られない(誤実装の受信口をAI_TM側が撤去した
+    際に送信側も作られなかった)。アカウント単位の判定は`screening.alert`
+    (`/webhooks/aitm/party-event`経由)でカバーする。AI_TM側の撤去完了を
+    確認してからルート自体を削除する — `WebhookEvent`履歴と撤去タイミング
+    のずれを吸収するため、今回はdocstringのみの変更にとどめる。
+    """
     ctx = await verify_webhook(
         request, source="aitm", secret_env="AITM_COMPLIANCE_WEBHOOK_SECRET",
         bearer_env="AITM_COMPLIANCE_WEBHOOK_BEARER",
@@ -172,6 +180,12 @@ async def receive_sanctions_list_update(request: Request, session: Session = Dep
     更新する経路のため優先的に対応(クロスリポジトリレビューで指摘)。
     併せて`record_webhook_event`によるイベント単位の冪等性も追加した
     (署名検証が無かった間はリトライ時に重複ActionItemが積まれていた)。
+
+    2026-10-27 非推奨(契約書§3): 個別`screening.alert`
+    (`/webhooks/aitm/party-event`経由)に一本化する方針に決定した。
+    AI_TM側に`hits[]`を束ねて送る実装が存在せず、今後も作られない。
+    AI_TM側の撤去完了を確認してからルート自体を削除する — 今回は
+    docstringのみの変更にとどめる。
     """
     ctx = await verify_webhook(
         request, source="aitm", secret_env="AITM_SANCTIONS_WEBHOOK_SECRET",
@@ -253,6 +267,34 @@ async def receive_sanctions_list_update(request: Request, session: Session = Dep
     return WebhookReceiptOut(hits_processed=len(body.hits))
 
 
+@router.post("/sanctions-sync-completed", status_code=204)
+async def receive_sanctions_sync_completed(request: Request, session: Session = Depends(get_session)) -> None:
+    """制裁リストの定期同期が完了した通知(2026-10-27、契約書§2-1、B-2)。
+
+    業務影響・ActionItemは無し — `WebhookEvent`に記録するだけのログ目的
+    (`/ui/integration-status`・`GET /webhooks/webhook-events`から確認できれば
+    目的を満たす)。既存の`/sanctions-list-updated`と同じチャネル
+    (`AITM_SANCTIONS_WEBHOOK_{SECRET,BEARER}`)を流用する。
+    """
+    ctx = await verify_webhook(
+        request, source="aitm", secret_env="AITM_SANCTIONS_WEBHOOK_SECRET",
+        bearer_env="AITM_SANCTIONS_WEBHOOK_BEARER",
+    )
+    session.execute(
+        text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
+        {"tenant_id": str(ctx.tenant_id)},
+    )
+    source = str(ctx.payload.get("source", ""))
+    synced_at = str(ctx.payload.get("synced_at", ""))
+    event_id = str(ctx.payload.get("event_id") or f"sanctions-sync:{source}:{synced_at}")[:64]
+
+    _event, _is_new = record_webhook_event(
+        session, ctx.tenant_id, event_id=event_id, source_system="aitm",
+        event_type="sanctions.sync_completed", payload=ctx.payload,
+    )
+    session.commit()
+
+
 REVIEW_ACTION_ASSIGNEE = "輸出管理チーム"
 _UNRESOLVED_STATUSES = (
     ReviewCaseStatus.HIT, ReviewCaseStatus.BLOCKED, ReviewCaseStatus.NEEDS_REVIEW,
@@ -295,13 +337,21 @@ async def receive_aitm_review_result(
         session.commit()
         return {"status": "duplicate"}
 
+    # 2026-10-27: AI_TMが送るcase_noはAI_TM採番値(provider_request_idに
+    # 保存済み、_dispatch_aitm_review_submit参照)。CRM採番のcase_no列で
+    # 引くと常にヒットせず、IF-10が100%ERRORになっていた(クロスリポジトリ
+    # レビューで発覚)。CRM採番へのfallbackは入れない — 「どちらの採番値で
+    # 引いているか」を曖昧にすると同じ事故を再発させる。
     review_case = session.execute(
         select(ReviewCase).where(
-            ReviewCase.tenant_id == ctx.tenant_id, ReviewCase.case_no == case_no,
+            ReviewCase.tenant_id == ctx.tenant_id, ReviewCase.provider_request_id == case_no,
         )
     ).scalar_one_or_none()
     if review_case is None:
-        _mark_event_result(event, WebhookEventResult.ERROR, error=f"該当する ReviewCase が見つかりません: {case_no}")
+        _mark_event_result(
+            event, WebhookEventResult.ERROR,
+            error=f"該当する ReviewCase が見つかりません (AI_TM case_no={case_no})",
+        )
         session.commit()
         return {"status": "processed"}
 
@@ -376,13 +426,18 @@ async def receive_override_applied(
         session.commit()
         return {"status": "duplicate"}
 
+    # 2026-10-27: receive_aitm_review_resultと同じ理由でprovider_request_id
+    # で引く(AI_TM採番値)。CRM採番のcase_no列へのfallbackは入れない。
     review_case = session.execute(
         select(ReviewCase).where(
-            ReviewCase.tenant_id == ctx.tenant_id, ReviewCase.case_no == case_no,
+            ReviewCase.tenant_id == ctx.tenant_id, ReviewCase.provider_request_id == case_no,
         )
     ).scalar_one_or_none()
     if review_case is None:
-        _mark_event_result(event, WebhookEventResult.ERROR, error=f"該当する ReviewCase が見つかりません: {case_no}")
+        _mark_event_result(
+            event, WebhookEventResult.ERROR,
+            error=f"該当する ReviewCase が見つかりません (AI_TM case_no={case_no})",
+        )
         session.commit()
         return {"status": "processed"}
 

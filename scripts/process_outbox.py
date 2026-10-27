@@ -30,6 +30,7 @@ from crm_mvp.services.deemed_export import register_deemed_export_dispatchers
 from crm_mvp.services.erp_transcription import register_erp_transcription_dispatchers
 from crm_mvp.services.license import register_aitm_license_dispatchers
 from crm_mvp.services.outbox import process_outbox
+from crm_mvp.services.party_compliance import register_aitm_party_dispatchers
 from crm_mvp.services.review_case import register_aitm_dispatchers
 
 DEFAULT_DATABASE_URL = "postgresql+psycopg://crm_app@localhost:5432/crm_mvp"
@@ -59,6 +60,7 @@ def main() -> None:
     register_erp_transcription_dispatchers()
     register_aitm_license_dispatchers()
     register_deemed_export_dispatchers()
+    register_aitm_party_dispatchers()
     engine = create_engine(args.database_url)
 
     while True:
