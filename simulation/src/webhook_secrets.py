@@ -46,6 +46,9 @@ WEBHOOK_SECRETS: dict[str, dict[str, str]] = {
         "secret_env": "AITM_OVERRIDE_WEBHOOK_SECRET", "secret": "dev-crm-signing-secret-000",
         "path": "/webhooks/override-applied",
     },
+    # 廃止予定(契約書§3): /webhooks/compliance-judgmentはAI_TM側に送信
+    # 実装が無く、個別screening.alert(aitm_party)に一本化する方針。
+    # AI_TM側の撤去完了を確認してから、このエントリ自体も削除する。
     "aitm_compliance": {
         "bearer_env": "AITM_COMPLIANCE_WEBHOOK_BEARER", "bearer": "dev-crm-outbound-bearer-000",
         "secret_env": "AITM_COMPLIANCE_WEBHOOK_SECRET", "secret": "dev-crm-signing-secret-000",
